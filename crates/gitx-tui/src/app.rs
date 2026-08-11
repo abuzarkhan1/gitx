@@ -41,8 +41,9 @@ pub struct App {
     pub hotspots: Option<gitx_analysis::RepoAnalysis>,
     /// Branches (docs/08 Branches panel).
     pub branches: Option<Vec<gitx_git::models::Branch>>,
-    /// Contributors: author key → commit count, sorted descending.
-    pub contributors: Option<Vec<(String, u64)>>,
+    /// Contributors: key, display name, commit count, first/last activity,
+    /// files touched (from live analysis; empty from the cache).
+    pub contributors: Option<Vec<Contributor>>,
     /// Declared dependencies in HEAD (docs/08 Dependencies panel).
     pub dependencies: Option<Vec<(std::path::PathBuf, Vec<gitx_analysis::manifest::Dependency>)>>,
     /// Recovery data: reflog entries + unreachable commits (docs/08 Recovery).
@@ -76,6 +77,9 @@ pub struct App {
     /// Changed-file count per timeline commit, aligned with `timeline`
     /// (docs/08 Timeline: changed-file count column).
     pub timeline_file_counts: Option<Vec<u32>>,
+    /// Top affected directory per timeline commit (docs/08 Commit view:
+    /// affected-areas). Empty string when none.
+    pub timeline_areas: Option<Vec<String>>,
     /// Tip-commit timestamp per branch, aligned with `branches` (docs/08
     /// Branch view: age + activity).
     pub branch_tips: Option<Vec<i64>>,
@@ -371,18 +375,32 @@ impl App {
 
 /// All repository data loaded eagerly at startup, keyed by the panels that
 /// consume it (docs/08).
+/// A contributor row for the Contributors panel (docs/08 §3).
+#[derive(Debug, Clone)]
+pub struct Contributor {
+    pub key: String,
+    pub name: String,
+    pub commits: u64,
+    pub first_activity: i64,
+    pub last_activity: i64,
+    /// Number of distinct files the author touched (0 when unknown, e.g.
+    /// when reading from the analysis cache).
+    pub files_touched: u64,
+}
+
 pub struct AppData {
     pub stats: Option<gitx_analysis::RepoStats>,
     pub timeline: Option<Vec<gitx_git::models::Commit>>,
     pub hotspots: Option<gitx_analysis::RepoAnalysis>,
     pub branches: Option<Vec<gitx_git::models::Branch>>,
-    pub contributors: Option<Vec<(String, u64)>>,
+    pub contributors: Option<Vec<Contributor>>,
     pub dependencies: Option<Vec<(std::path::PathBuf, Vec<gitx_analysis::manifest::Dependency>)>>,
     pub recovery: Option<gitx_analysis::RecoveryReport>,
     pub repo_path: Option<String>,
     pub error: Option<String>,
     pub activity: Option<Vec<(String, u32)>>,
     pub timeline_file_counts: Option<Vec<u32>>,
+    pub timeline_areas: Option<Vec<String>>,
     pub branch_tips: Option<Vec<i64>>,
     pub repo_state: Option<String>,
     pub health_evidence: Vec<Vec<String>>,
@@ -416,9 +434,9 @@ fn load_repo_stats() -> AppData {
     let path = repo.work_dir().map(|p| p.display().to_string());
     let repo_state = repo.state();
 
-    // Index-backed fast path (docs/13 §3): with a fresh persisted index the
-    // overview statistics come from SQLite in milliseconds; otherwise fall
-    // back to live computation from Git.
+    // Services layer (docs/04 §6): statistics and analysis go through
+    // `RepositoryService`/`AnalysisService`, which prefer the fresh persisted
+    // index and fall back to live Git computation (docs/13 §3).
     let stats = index_stats_or_live(&repo);
     let service = gitx_history::timeline::HistoryService::new(&repo);
     let timeline = service
@@ -427,26 +445,52 @@ fn load_repo_stats() -> AppData {
             ..Default::default()
         })
         .ok();
-    // Index-backed analysis (docs/13 §3): when a fresh persisted analysis
-    // cache exists, the hotspot/health panels read it instead of recomputing
-    // from Git; otherwise fall back to live analysis.
-    let hotspots = index_analysis_or_live(&repo);
+    // Index-backed analysis via AnalysisService (docs/04 §6, docs/13 §3):
+    // fresh cache → read; otherwise live computation.
+    let hotspots = gitx_services::AnalysisService::new(&repo)
+        .analyze(true, gitx_analysis::hotspots::HotspotWeights::default())
+        .ok();
     let branches = repo.branches().ok();
 
-    // Contributors from the timeline (author key → commit count).
+    // Contributors from the timeline: commit count + first/last activity +
+    // files touched (from live analysis author_lines; empty from the cache).
+    let files_by_author = hotspots.as_ref().map(|a| {
+        let mut map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        for file in &a.files {
+            for (author, _) in &file.author_lines {
+                *map.entry(author.clone()).or_insert(0) += 1;
+            }
+        }
+        map
+    });
     let contributors = timeline.as_ref().map(|commits| {
-        let mut counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        let mut counts: std::collections::HashMap<String, Contributor> =
+            std::collections::HashMap::new();
         for c in commits {
             let key = format!("{} <{}>", c.author.name, c.author.email);
-            *counts.entry(key).or_insert(0) += 1;
+            let entry = counts.entry(key.clone()).or_insert(Contributor {
+                key: key.clone(),
+                name: c.author.name.clone(),
+                commits: 0,
+                first_activity: i64::MAX,
+                last_activity: i64::MIN,
+                files_touched: 0,
+            });
+            entry.commits += 1;
+            entry.first_activity = entry.first_activity.min(c.author.time);
+            entry.last_activity = entry.last_activity.max(c.author.time);
+            if let Some(map) = &files_by_author {
+                entry.files_touched = map.get(&key).copied().unwrap_or(0);
+            }
         }
-        let mut list: Vec<(String, u64)> = counts.into_iter().collect();
-        list.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        let mut list: Vec<Contributor> = counts.into_values().collect();
+        list.sort_by_key(|c| std::cmp::Reverse(c.commits));
         list
     });
 
-    // Changed-file count per timeline commit (docs/08 Timeline column).
-    let timeline_file_counts = timeline.as_ref().map(|commits| {
+    // Changed-file count + top affected directory per timeline commit
+    // (docs/08 Timeline column, Commit view affected-areas).
+    let per_commit_areas = timeline.as_ref().map(|commits| {
         commits
             .iter()
             .map(|c| {
@@ -454,12 +498,29 @@ fn load_repo_stats() -> AppData {
                     Some(parent) => repo.find_commit(*parent).ok().map(|p| p.tree_id),
                     None => None,
                 };
-                repo.diff_tree_to_tree(parent_tree, c.tree_id)
-                    .map(|changes| changes.len() as u32)
-                    .unwrap_or(0)
+                let changes = repo.diff_tree_to_tree(parent_tree, c.tree_id).unwrap_or_default();
+                let mut dirs: std::collections::HashMap<String, u32> =
+                    std::collections::HashMap::new();
+                for change in &changes {
+                    let dir = change
+                        .path
+                        .parent()
+                        .filter(|p| !p.as_os_str().is_empty())
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| ".".to_string());
+                    *dirs.entry(dir).or_insert(0) += 1;
+                }
+                let top = dirs.into_iter().max_by_key(|(_, n)| *n).map(|(d, _)| d);
+                (changes.len() as u32, top.unwrap_or_else(|| String::new()))
             })
-            .collect()
+            .collect::<Vec<(u32, String)>>()
     });
+    let timeline_file_counts = per_commit_areas
+        .as_ref()
+        .map(|v| v.iter().map(|(n, _)| *n).collect());
+    let timeline_areas = per_commit_areas
+        .as_ref()
+        .map(|v| v.iter().map(|(_, a)| a.clone()).collect());
 
     // Weekly commit counts, last 12 weeks (docs/08 Overview activity chart).
     let activity = timeline.as_ref().map(|commits| {
@@ -522,21 +583,6 @@ fn load_repo_stats() -> AppData {
         repo_state,
         health_evidence,
     }
-}
-
-/// Hotspot/health analysis: prefer a fresh persisted analysis cache, fall
-/// back to live computation (docs/13 §3).
-fn index_analysis_or_live(repo: &gitx_git::Repository) -> Option<gitx_analysis::RepoAnalysis> {
-    let path = crate::index_backed::default_index_path(repo);
-    if let Ok(conn) = rusqlite::Connection::open(&path) {
-        if gitx_storage::migrations::ensure_schema_compatible(&conn).is_ok()
-            && gitx_analysis::cache::is_fresh(&conn, repo)
-            && let Ok(Some(a)) = gitx_analysis::cache::load(&conn)
-        {
-            return Some(a);
-        }
-    }
-    gitx_analysis::analyze_repository(repo).ok()
 }
 
 /// Statistics for the Overview panel: prefer a fresh persisted index, fall
