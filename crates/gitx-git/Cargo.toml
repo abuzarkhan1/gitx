@@ -10,3 +10,4 @@ gix = { workspace = true }
 gitx-index = { path = "../gitx-index" }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+tracing = { workspace = true }

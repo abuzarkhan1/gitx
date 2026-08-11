@@ -307,6 +307,45 @@ END;
 UPDATE index_metadata SET value = '3' WHERE key = 'schema_version';
 "#;
 
+/// The newest schema version this build understands (docs/18 §7: indexes
+/// written by a *newer* build must be detected and explained, not silently
+/// read or overwritten).
+pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+
+/// Read the stored schema version without applying migrations. `None` when
+/// the metadata table is missing (a v0/empty database).
+pub fn stored_schema_version(conn: &Connection) -> crate::Result<Option<i64>> {
+    match conn.query_row(
+        "SELECT value FROM index_metadata WHERE key = 'schema_version'",
+        [],
+        |row| {
+            let v: String = row.get(0)?;
+            Ok(v.parse::<i64>().unwrap_or(0))
+        },
+    ) {
+        Ok(v) => Ok(Some(v)),
+        // A brand-new (empty) database has no metadata table yet — that is a
+        // v0 database, fully compatible and awaiting migration.
+        Err(rusqlite::Error::SqliteFailure(_, Some(msg))) if msg.contains("no such table") => {
+            Ok(None)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Error if the stored schema version is newer than this build understands
+/// (docs/18 §7). Returns the stored version otherwise.
+pub fn ensure_schema_compatible(conn: &Connection) -> crate::Result<i64> {
+    let version = stored_schema_version(conn)?.unwrap_or(0);
+    if version > CURRENT_SCHEMA_VERSION {
+        return Err(crate::error::Error::SchemaNewer {
+            stored: version,
+            supported: CURRENT_SCHEMA_VERSION,
+        });
+    }
+    Ok(version)
+}
+
 pub fn apply_migrations(conn: &mut Connection) -> Result<()> {
     let tx = conn.transaction()?;
 

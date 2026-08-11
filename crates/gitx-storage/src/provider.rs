@@ -1,6 +1,7 @@
 use gitx_index::contracts::{StorageProvider, Transaction};
 use gitx_index::error::IndexerError;
 use gitx_index::models::{Commit, Oid, RefInfo};
+use rusqlite::OptionalExtension;
 use std::cell::{RefCell, RefMut};
 use std::result::Result;
 
@@ -33,6 +34,17 @@ impl StorageProvider for SqliteStorageProvider<'_> {
             conn: guard,
             active: true,
         }))
+    }
+
+    fn get_meta(&self, key: &str) -> Result<Option<String>, IndexerError> {
+        let conn = self.conn.borrow();
+        conn.query_row(
+            "SELECT value FROM index_metadata WHERE key = ?1",
+            [key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| IndexerError::StorageError(e.to_string()))
     }
 
     fn get_indexed_refs(&self) -> Result<Vec<RefInfo>, IndexerError> {
@@ -162,6 +174,17 @@ impl Transaction for SqliteTransaction<'_> {
         Ok(count > 0)
     }
 
+    fn write_meta(&mut self, key: &str, value: &str) -> Result<(), IndexerError> {
+        self.conn
+            .execute(
+                "INSERT INTO index_metadata (key, value) VALUES (?1, ?2) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                rusqlite::params![key, value],
+            )
+            .map_err(|e| IndexerError::StorageError(e.to_string()))?;
+        Ok(())
+    }
+
     fn remove_ref(&mut self, ref_name: &str) -> Result<(), IndexerError> {
         let (name, is_tag) = if let Some(n) = ref_name.strip_prefix("refs/tags/") {
             (n.to_string(), true)
@@ -206,6 +229,9 @@ pub fn open_indexed(path: &std::path::Path) -> crate::Result<RefCell<rusqlite::C
         std::fs::create_dir_all(parent).ok();
     }
     let mut conn = rusqlite::Connection::open(path)?;
+    // Newer-schema detection (docs/18 §7): refuse to silently read or
+    // overwrite an index written by a newer gitx build.
+    crate::migrations::ensure_schema_compatible(&conn)?;
     crate::migrations::apply_migrations(&mut conn)?;
     Ok(RefCell::new(conn))
 }

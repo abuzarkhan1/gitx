@@ -1,6 +1,7 @@
 pub mod config;
 pub mod error;
 pub mod id;
+pub mod identity;
 pub mod log;
 pub mod types;
 

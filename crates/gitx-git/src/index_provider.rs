@@ -7,6 +7,11 @@ use std::result::Result;
 /// Adapts [`gitx_git::Repository`] to the [`GitProvider`] contract used by the
 /// incremental indexer (docs/09).
 impl GitProvider for Repository {
+    fn head_ref_name(&self) -> Result<Option<String>, IndexerError> {
+        self.head_ref_name()
+            .map_err(|e| IndexerError::GitError(e.to_string()))
+    }
+
     fn read_refs(&self) -> Result<Vec<RefInfo>, IndexerError> {
         let mut refs = Vec::new();
 

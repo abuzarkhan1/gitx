@@ -6,9 +6,27 @@ pub struct Repository {
     pub(crate) repo: gix::Repository,
 }
 
+impl Clone for Repository {
+    /// Cheap handle clone sharing the underlying object database. Each clone
+    /// gets its own cache slots, so cloning per worker thread is the
+    /// recommended gix pattern for parallel reads (docs/13 §6).
+    fn clone(&self) -> Self {
+        Self {
+            repo: self.repo.clone(),
+        }
+    }
+}
+
 impl Repository {
     pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
+        let started = std::time::Instant::now();
         let repo = gix::discover(path.as_ref()).map_err(|e| GitError::OpenFailed(e.to_string()))?;
+        tracing::debug!(
+            path = %path.as_ref().display(),
+            git_dir = %repo.git_dir().display(),
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "repository discovered"
+        );
         Ok(Self { repo })
     }
 
@@ -166,6 +184,18 @@ impl Repository {
         self.repo.state().map(|s| format!("{:?}", s))
     }
 
+    /// The fully-qualified name of the branch HEAD points at (e.g.
+    /// `refs/heads/main`), when HEAD is symbolic. Used by the indexer to
+    /// track the true HEAD lineage for rewritten-history detection (docs/09
+    /// §5), since branch iteration order is otherwise arbitrary.
+    pub fn head_ref_name(&self) -> Result<Option<String>> {
+        match self.repo.head_name() {
+            Ok(Some(name)) => Ok(Some(name.to_string())),
+            Ok(None) => Ok(None),
+            Err(_) => Ok(None),
+        }
+    }
+
     /// Recursively list every blob path (file) reachable from `tree_id`.
     /// Submodules are skipped.
     pub fn list_blobs(&self, tree_id: ObjectId) -> Result<Vec<std::path::PathBuf>> {
@@ -181,6 +211,31 @@ impl Repository {
         collect_entries(&self.repo, tree_id, std::path::PathBuf::new(), &mut out)?;
         Ok(out)
     }
+
+    /// Every tree object id reachable from `tree_id`, including the root
+    /// itself (used by recovery to classify dangling trees, docs/12).
+    pub fn tree_oids(&self, tree_id: ObjectId) -> Result<Vec<ObjectId>> {
+        let mut out = Vec::new();
+        collect_trees(&self.repo, tree_id, &mut out)?;
+        Ok(out)
+    }
+}
+
+fn collect_trees(repo: &gix::Repository, tree_id: ObjectId, out: &mut Vec<ObjectId>) -> Result<()> {
+    out.push(tree_id);
+    let tree = repo
+        .find_object(tree_id.0)
+        .map_err(|e| GitError::ObjectReadError(tree_id.to_string(), e.to_string()))?
+        .into_tree();
+    let decoded = tree
+        .decode()
+        .map_err(|e| GitError::TreeError(e.to_string()))?;
+    for entry in decoded.entries {
+        if entry.mode.is_tree() {
+            collect_trees(repo, ObjectId(entry.oid.to_owned()), out)?;
+        }
+    }
+    Ok(())
 }
 
 fn collect_entries(

@@ -9,6 +9,8 @@ pub enum EntityType {
     Tag,
     Author,
     Symbol,
+    /// A match inside file contents (`gitx search --code`, docs/11 §4).
+    Code,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

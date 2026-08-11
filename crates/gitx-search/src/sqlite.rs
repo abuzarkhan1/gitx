@@ -13,24 +13,37 @@ impl<'a> SqliteSearchBackend<'a> {
 
 impl<'a> SearchBackend for SqliteSearchBackend<'a> {
     fn search_commits(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, SearchError> {
-        let mut sql = String::from("SELECT oid, message, bm25(commits_fts) as score FROM commits_fts WHERE commits_fts MATCH ?");
+        // The FTS table stores oid + message only; author/since filters need a
+        // join to the normalized commits/authors tables (docs/11 §4).
+        let mut sql = String::from(
+            "SELECT c.oid, c.message, bm25(commits_fts) as score \
+             FROM commits_fts \
+             JOIN commits c ON c.oid = commits_fts.oid \
+             JOIN authors a ON a.id = c.author_id \
+             WHERE commits_fts MATCH ?",
+        );
+        let mut params: Vec<String> = vec![query.term.clone()];
 
-        // Handle basic filters (e.g., author) in an FTS context if possible,
-        // or assume an underlying view/table join. For simplicity, we append them if needed.
         if let Some(author) = &query.filters.author {
-            // FTS5 boolean query syntax could be used, or a regular WHERE clause
-            // if author is an indexed/unindexed column.
-            sql.push_str(&format!(" AND author = '{}'", author.replace('\'', "''")));
+            sql.push_str(" AND (a.name LIKE ? OR a.email LIKE ?)");
+            let pattern = format!("%{author}%");
+            params.push(pattern.clone());
+            params.push(pattern);
+        }
+        if let Some(since) = &query.filters.since {
+            sql.push_str(" AND c.timestamp >= ?");
+            params.push(since.clone());
         }
 
         sql.push_str(" ORDER BY score LIMIT 50");
 
+        let param_refs: Vec<&str> = params.iter().map(String::as_str).collect();
         let mut stmt = self
             .conn
             .prepare(&sql)
             .map_err(|e| SearchError::Database(e.to_string()))?;
         let rows = stmt
-            .query_map([&query.term], |row| {
+            .query_map(rusqlite::params_from_iter(param_refs), |row| {
                 let id: String = row.get(0)?;
                 let msg: String = row.get(1)?;
                 let score: f64 = row.get(2)?;

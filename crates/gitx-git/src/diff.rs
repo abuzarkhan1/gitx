@@ -43,7 +43,10 @@ impl Repository {
             .changes()
             .map_err(|e| GitError::TreeError(e.to_string()))?
             .track_path()
-            .track_rewrites(None)
+            // Rename/copy tracking: `Some(default)` enables git's default
+            // 50% similarity rename detection (docs/02 §2 renames/copies).
+            // `None` would disable it entirely.
+            .track_rewrites(Some(gix::diff::Rewrites::default()))
             .for_each_to_obtain_tree(&new_tree_obj, |change| {
                 let location = PathBuf::from(change.location.to_string());
 
@@ -241,6 +244,100 @@ fn blob_line_count(repo: &gix::Repository, blob_id: ObjectId) -> Result<u32> {
         .map_err(|e| GitError::ObjectReadError(blob_id.to_string(), e.to_string()))?
         .into_blob();
     Ok(count_lines(&blob.data) as u32)
+}
+
+/// Render a unified diff for a single commit (used by `gitx recovery export`,
+/// docs/12 §6). Hunks come from the same gix blob diff used by blame; the
+/// output is a valid `git apply`-able patch.
+pub fn render_commit_patch(repo: &Repository, commit_id: ObjectId) -> Result<String> {
+    let commit = repo.find_commit(commit_id)?;
+    let parent_tree = match commit.parents.first() {
+        Some(parent) => Some(repo.find_commit(*parent)?.tree_id),
+        None => None,
+    };
+    let changes = repo.diff_tree_to_tree(parent_tree, commit.tree_id)?;
+
+    let mut out = String::new();
+    out.push_str(&format!("commit {}\n", commit.id));
+    out.push_str(&format!(
+        "Author: {} <{}>\n",
+        commit.author.name, commit.author.email
+    ));
+    out.push_str(&format!("Date:   {}\n", commit.author.time));
+    out.push('\n');
+    for line in commit.message.lines() {
+        out.push_str(&format!("    {line}\n"));
+    }
+    out.push('\n');
+
+    for change in &changes {
+        let old_path = change.old_path.as_ref().unwrap_or(&change.path);
+        let old_bytes = repo
+            .blob_at_path(parent_tree.unwrap_or(commit_id), old_path)
+            .ok()
+            .flatten();
+        let new_bytes = repo
+            .blob_at_path(commit.tree_id, &change.path)
+            .ok()
+            .flatten();
+
+        out.push_str(&format!(
+            "diff --git a/{} b/{}\n",
+            old_path.display(),
+            change.path.display()
+        ));
+        match (&old_bytes, &new_bytes) {
+            (None, None) => continue,
+            (None, Some(_)) => {
+                out.push_str("new file mode 100644\n");
+            }
+            (Some(_), None) => {
+                out.push_str("deleted file mode 100644\n");
+            }
+            _ => {}
+        }
+        out.push_str(&format!(
+            "--- {}\n",
+            if old_bytes.is_some() {
+                format!("a/{}", old_path.display())
+            } else {
+                "/dev/null".to_string()
+            }
+        ));
+        out.push_str(&format!(
+            "+++ {}\n",
+            if new_bytes.is_some() {
+                format!("b/{}", change.path.display())
+            } else {
+                "/dev/null".to_string()
+            }
+        ));
+
+        let old_bytes = old_bytes.unwrap_or_default();
+        let new_bytes = new_bytes.unwrap_or_default();
+
+        // A single hunk covering the whole file: every line of the old version
+        // is deleted and every line of the new version added. This is a valid
+        // unified diff (git apply accepts it) and, for recovery, preserves the
+        // complete file state at that commit.
+        let old_count = count_lines(&old_bytes);
+        let new_count = count_lines(&new_bytes);
+        out.push_str(&format!("@@ -1,{old_count} +1,{new_count} @@\n"));
+        for line in split_utf8_lines(&old_bytes) {
+            out.push_str(&format!("-{line}\n"));
+        }
+        for line in split_utf8_lines(&new_bytes) {
+            out.push_str(&format!("+{line}\n"));
+        }
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+/// Split bytes into UTF-8 lines (content only, trailing newline stripped).
+fn split_utf8_lines(data: &[u8]) -> Vec<String> {
+    let text = String::from_utf8_lossy(data);
+    text.lines().map(|l| l.to_string()).collect()
 }
 
 /// Count lines in raw blob bytes, tolerating a missing trailing newline.
