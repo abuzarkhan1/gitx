@@ -1,0 +1,16 @@
+--- src/repository.rs
++++ src/repository.rs
+@@ -7,6 +7,12 @@
+     pub(crate) repo: gix::Repository,
+ }
+ 
++impl Repository {
++    pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
++        let repo = gix::discover(path.as_ref()).map_err(|e| GitError::OpenFailed(e.to_string()))?;
++        Ok(Self { repo })
++    }
++
++    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+         let repo = gix::open(path.as_ref()).map_err(|e| GitError::OpenFailed(e.to_string()))?;
+         Ok(Self { repo })
+     }

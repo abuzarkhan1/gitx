@@ -1,0 +1,36 @@
+[workspace]
+members = [
+    "crates/gitx-cli",
+    "crates/gitx-core",
+    "crates/gitx-git",
+    "crates/gitx-index",
+    "crates/gitx-storage",
+    "crates/gitx-history",
+    "crates/gitx-analysis",
+    "crates/gitx-graph",
+    "crates/gitx-search",
+    "crates/gitx-tui"
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["GitX Contributors"]
+license = "MIT"
+
+[workspace.dependencies]
+anyhow = "1.0"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+gix = "0.66"
+rusqlite = { version = "0.32", features = ["bundled"] }
+clap = { version = "4.5", features = ["derive"] }
+ratatui = "0.28"
+crossterm = "0.28"
+petgraph = "0.6"
+rayon = "1.10"
+ignore = "0.4"
+criterion = "0.5"
