@@ -83,7 +83,7 @@ gitx history <PATH> --lines
 gitx blame <PATH>
 ```
 
-`--lines` / `blame` expose line-level history (which commit introduced or last changed each line). This is an expensive operation and must be computed lazily and paginated.
+`--lines` / `blame` expose line-level history (which commit introduced or last changed each line). This is an expensive operation and must be computed lazily and paginated; `gitx blame <PATH> --limit N` (default 500) pages the output.
 
 ## 8. Branches
 
@@ -125,10 +125,12 @@ gitx hotspots --json
 
 ```bash
 gitx architecture
-gitx architecture --from <REF>
-gitx architecture --to <REF>
+gitx architecture --from <REF> --to <REF>
 gitx architecture diff <REF1> <REF2>
 ```
+
+`--from` and `--to` are equivalent to `architecture diff <from> <to>` and must
+be provided together.
 
 ## 12. Dependencies
 
@@ -166,7 +168,15 @@ gitx search <QUERY> --commits
 gitx search <QUERY> --files
 gitx search <QUERY> --authors
 gitx search <QUERY> --branches
+gitx search <QUERY> --renames
+gitx search <QUERY> --code
+gitx search <QUERY> --history
+gitx search <QUERY> --since <DATE>
+gitx search <QUERY> --author <NAME>
 ```
+
+`--since` accepts RFC3339, `YYYY-MM-DD`, or unix seconds and filters commit
+results. `--author` matches author name/email substrings.
 
 ## 16. Recovery
 
@@ -183,8 +193,11 @@ Recovery commands must default to read-only behavior.
 
 ```bash
 gitx release <TAG>
+gitx release show <TAG>
 gitx release diff <REF1> <REF2>
 ```
+
+`gitx release <TAG>` is shorthand for `gitx release show <TAG>`.
 
 ## 18. Output contract
 
@@ -198,8 +211,6 @@ Use stderr for diagnostics.
 
 ## 19. Exit codes
 
-Suggested:
-
 ```text
 0  success
 1  general error
@@ -210,5 +221,3 @@ Suggested:
 6  unsupported operation
 7  analysis incomplete
 ```
-
-Exact codes should be stabilized before V1.
