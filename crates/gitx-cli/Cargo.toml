@@ -15,6 +15,7 @@ gitx-analysis = { path = "../gitx-analysis" }
 gitx-graph = { path = "../gitx-graph" }
 gitx-index = { path = "../gitx-index" }
 gitx-search = { path = "../gitx-search" }
+gitx-services = { path = "../gitx-services" }
 gitx-storage = { path = "../gitx-storage" }
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }

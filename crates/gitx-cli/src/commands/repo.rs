@@ -1,81 +1,86 @@
 use crate::cli::Cli;
 use crate::commands::{format_ts, open_repo, print_json, short_oid};
+use gitx_services::RepositoryService;
 use serde_json::json;
 
 pub fn info(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
-    let head = repo.head_commit_id().ok();
-    let head_commit = head.and_then(|id| repo.find_commit(id).ok());
-    let branches = repo.branches().unwrap_or_default();
-    let tags = repo.tags().unwrap_or_default();
-
-    let work_dir = repo
-        .work_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<bare>".to_string());
+    let service = RepositoryService::new(&repo);
+    let data = service.info();
 
     if cli.json {
-        return print_json(&json!({
-            "work_dir": work_dir,
-            "git_dir": repo.git_dir().display().to_string(),
-            "head": head.map(|id| id.to_string()),
-            "head_message": head_commit.as_ref().map(|c| c.message.clone()),
-            "state": repo.state(),
-            "branches": branches.len(),
-            "tags": tags.len(),
-        }));
+        return print_json(&data);
     }
 
     println!("GitX repository");
-    println!("  work dir : {work_dir}");
-    println!("  git dir  : {}", repo.git_dir().display());
-    if let Some(commit) = &head_commit {
-        println!("  head     : {} {}", short_oid(&commit.id), commit.message);
+    println!(
+        "  work dir : {}",
+        data["work_dir"].as_str().unwrap_or("<bare>")
+    );
+    println!("  git dir  : {}", data["git_dir"].as_str().unwrap_or("?"));
+    if let Some(head) = data["head"].as_str() {
+        println!(
+            "  head     : {} {}",
+            short_oid(&gitx_git::models::ObjectId::from_hex(head).expect("head oid")),
+            data["head_message"].as_str().unwrap_or("")
+        );
     } else {
         println!("  head     : (no commits yet)");
     }
-    println!(
-        "  state    : {}",
-        repo.state().unwrap_or_else(|| "clean".into())
-    );
-    println!("  branches : {}", branches.len());
-    println!("  tags     : {}", tags.len());
+    println!("  state    : {}", data["state"].as_str().unwrap_or("clean"));
+    let index_state: gitx_services::IndexState =
+        serde_json::from_value(data["index_state"].clone())
+            .unwrap_or(gitx_services::IndexState::Unsupported);
+    println!("  index    : {}", index_state_label(index_state));
+    println!("  branches : {}", data["branches"].as_u64().unwrap_or(0));
+    println!("  tags     : {}", data["tags"].as_u64().unwrap_or(0));
     Ok(())
+}
+
+fn index_state_label(state: gitx_services::IndexState) -> String {
+    use gitx_services::IndexState;
+    match state {
+        IndexState::Indexed => "Indexed (fresh)".into(),
+        IndexState::PartiallyIndexed => "PartiallyIndexed (stale — run `gitx refresh`)".into(),
+        IndexState::Failed => "Failed (corrupt — run `gitx index rebuild`)".into(),
+        IndexState::Unsupported => "Unsupported (no index — analysis computed live)".into(),
+    }
 }
 
 pub fn status(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
-    let state = repo.state();
+    let service = RepositoryService::new(&repo);
+    let state = service.state();
     let head = repo.head_commit_id().ok();
 
     if cli.json {
         return print_json(&json!({
-            "state": state,
+            "state": state.git,
+            "index_state": state.index,
             "head": head.map(|id| id.to_string()),
         }));
     }
 
-    match state.as_deref() {
-        Some("Clean") | None => println!("clean"),
-        Some(other) => println!("{other} (merge/rebase in progress)"),
-    }
+    match state.git.to_lowercase().as_str() {
+        "clean" | "" => println!("clean"),
+        other => println!("{other} (merge/rebase in progress)"),
+    }    println!("  index    : {}", index_state_label(state.index));
     match head {
         Some(id) => {
             let commit = repo.find_commit(id)?;
-            println!("HEAD at {} — {}", short_oid(&id), commit.message);
+            println!("  HEAD     : {} — {}", short_oid(&id), commit.message);
         }
-        None => println!("HEAD unborn (no commits)"),
+        None => println!("  HEAD     : unborn (no commits)"),
     }
     Ok(())
 }
 
 pub fn stats(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
+    let service = RepositoryService::new(&repo);
     // Index-backed fast path (docs/13 §3): with a fresh index the statistics
     // come from SQLite in milliseconds instead of recomputing from Git.
-    let from_index = crate::commands::index::stats_from_index(&repo)
-        .ok()
-        .flatten();
+    let from_index = service.stats_from_index().ok().flatten();
     let (stats, source) = match from_index {
         Some(s) => (
             gitx_analysis::RepoStats {

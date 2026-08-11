@@ -261,32 +261,15 @@ pub fn ownership(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Analysis results from the persisted index when it is fresh (docs/13 §3),
-/// otherwise `None` (callers compute live). `--no-cache` forces live.
-fn analysis_from_cache(cli: &Cli, repo: &gitx_git::Repository) -> Option<gitx_analysis::RepoAnalysis> {
-    if cli.no_cache {
-        return None;
-    }
-    let path = crate::commands::index::default_index_path(repo);
-    if !path.exists() {
-        return None;
-    }
-    let conn = rusqlite::Connection::open(&path).ok()?;
-    if gitx_storage::migrations::ensure_schema_compatible(&conn).is_err() {
-        return None;
-    }
-    if !gitx_analysis::cache::is_fresh(&conn, repo) {
-        return None;
-    }
-    gitx_analysis::cache::load(&conn).ok().flatten()
+/// Run the analysis through `AnalysisService` (docs/04 §6): index-backed
+/// when fresh, live otherwise. `--no-cache` forces the live path.
+fn analyze(cli: &Cli, repo: &gitx_git::Repository) -> anyhow::Result<gitx_analysis::RepoAnalysis> {
+    gitx_services::AnalysisService::new(repo).analyze(!cli.no_cache, weights(cli))
 }
 
 pub fn hotspots(cli: &Cli, limit: usize, path: Option<&str>) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
-    let analysis = match analysis_from_cache(cli, &repo) {
-        Some(a) => a,
-        None => analyze_repository_with(&repo, weights(cli))?,
-    };
+    let analysis = analyze(cli, &repo)?;
 
     let files: Vec<&FileAnalysis> = analysis
         .files
@@ -327,10 +310,7 @@ pub fn hotspots(cli: &Cli, limit: usize, path: Option<&str>) -> anyhow::Result<(
 
 pub fn risk(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
-    let analysis = match analysis_from_cache(cli, &repo) {
-        Some(a) => a,
-        None => analyze_repository_with(&repo, weights(cli))?,
-    };
+    let analysis = analyze(cli, &repo)?;
 
     let files: Vec<&FileAnalysis> = match path {
         Some(p) => analysis
@@ -373,10 +353,7 @@ pub fn risk(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
 
 pub fn health(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
-    let analysis = match analysis_from_cache(cli, &repo) {
-        Some(a) => a,
-        None => analyze_repository_with(&repo, weights(cli))?,
-    };
+    let analysis = analyze(cli, &repo)?;
     let h = &analysis.health;
 
     if cli.json {
