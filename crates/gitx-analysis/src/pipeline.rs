@@ -1,9 +1,12 @@
 use chrono::{TimeZone, Utc};
 use gitx_git::Repository;
-use gitx_git::models::Commit;
+use gitx_git::models::{Commit, ObjectId};
 use gitx_git::reflog::split_lines;
+use rayon::ThreadPool;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use crate::classification::classify_commit_message;
@@ -30,6 +33,32 @@ pub struct FileAnalysis {
     pub classification: &'static str,
     /// Composite risk score (evidence-backed, see docs/10).
     pub risk: f64,
+}
+
+/// Bounded worker pool for the analysis walk (docs/13 §6): CPU-heavy,
+/// independent work (commit diffs, blob reads) is parallelized without
+/// uncontrolled threads. Capped at 8 workers to keep memory bounded on
+/// large repositories.
+pub fn analysis_pool() -> &'static ThreadPool {
+    static POOL: OnceLock<ThreadPool> = OnceLock::new();
+    POOL.get_or_init(|| {
+        let workers = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .clamp(1, 8);
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .thread_name(|i| format!("gitx-analysis-{i}"))
+            .build()
+            .expect("failed to build analysis thread pool")
+    })
+}
+
+/// A commit plus the (path, insertions, deletions) deltas it introduced,
+/// extracted in parallel from the commit graph.
+struct CommitDeltas {
+    commit: Commit,
+    changes: Vec<(PathBuf, u32, u32)>,
 }
 
 /// Repository-wide analysis result.
@@ -74,20 +103,62 @@ pub fn analyze_repository_with(
     let started = Instant::now();
     let now = Utc::now().timestamp();
     let cutoff = now - RECENT_DAYS * 86_400;
+    tracing::debug!("repository analysis start");
 
     let head_id = repo.head_commit_id()?;
     let head_commit = repo.find_commit(head_id)?;
 
-    // 1. Walk history and accumulate per-file signals.
+    // 1. Collect the commit list (deterministic order: newest first).
+    let mut commit_ids: Vec<ObjectId> = Vec::new();
+    for commit_id_res in repo.rev_walk(head_id)? {
+        commit_ids.push(commit_id_res?);
+    }
+
+    // 2. Parallel walk (docs/13 §6): diff computation per commit is
+    //    independent, CPU-heavy work, so it runs on the bounded pool. The
+    //    results are folded back in original order, making the accumulated
+    //    metrics bit-for-bit identical to a sequential walk. The gix handle
+    //    is Send but not Sync, so each chunk opens its own handle against the
+    //    same git dir (the supported parallel-read pattern).
+    let workers = analysis_pool().current_num_threads();
+    let git_dir = repo.git_dir().to_path_buf();
+    let chunk = commit_ids.len().div_ceil(workers).max(1);
+    let per_commit: Vec<CommitDeltas> = analysis_pool().install(|| {
+        commit_ids
+            .par_chunks(chunk)
+            .map(|chunk| {
+                let local = Repository::open(&git_dir)?;
+                let mut out = Vec::with_capacity(chunk.len());
+                for cid in chunk {
+                    let commit = local.find_commit(*cid)?;
+                    let parent_tree = match commit.parents.first() {
+                        Some(parent) => Some(local.find_commit(*parent)?.tree_id),
+                        None => None,
+                    };
+                    let changes = local.diff_tree_to_tree(parent_tree, commit.tree_id)?;
+                    out.push(CommitDeltas {
+                        commit,
+                        changes: changes
+                            .iter()
+                            .map(|c| (c.path.clone(), c.insertions, c.deletions))
+                            .collect(),
+                    });
+                }
+                Ok(out)
+            })
+            .collect::<anyhow::Result<Vec<Vec<CommitDeltas>>>>()
+            .map(|chunks| chunks.into_iter().flatten().collect::<Vec<CommitDeltas>>())
+    })?;
+
+    // 3. Sequential fold — same order as a linear walk, so results are
+    //    deterministic regardless of pool size.
     let mut accs: HashMap<PathBuf, FileAcc> = HashMap::new();
     let mut total_commits = 0u64;
     let mut total_changes = 0u64;
     let mut recent_changes = 0u64;
     let mut author_set: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for commit_id_res in repo.rev_walk(head_id)? {
-        let commit_id = commit_id_res?;
-        let commit = repo.find_commit(commit_id)?;
+    for CommitDeltas { commit, changes } in per_commit {
         total_commits += 1;
 
         let author_key = author_key(&commit);
@@ -95,22 +166,15 @@ pub fn analyze_repository_with(
         let is_fix = classify_commit_message(&commit.message) == CommitClassification::Fix;
         let is_recent = commit.author.time >= cutoff;
 
-        let parent_tree = match commit.parents.first() {
-            Some(parent) => Some(repo.find_commit(*parent)?.tree_id),
-            None => None,
-        };
-        let changes = repo.diff_tree_to_tree(parent_tree, commit.tree_id)?;
-
-        for change in &changes {
+        for (path, insertions, deletions) in changes {
             total_changes += 1;
-            let path = &change.path;
-            let acc = accs.entry(path.clone()).or_default();
+            let acc = accs.entry(path).or_default();
 
             acc.change_frequency += 1;
-            acc.lines_added += change.insertions as u64;
-            acc.lines_deleted += change.deletions as u64;
+            acc.lines_added += insertions as u64;
+            acc.lines_deleted += deletions as u64;
             if is_recent {
-                acc.recent_churn += (change.insertions + change.deletions) as u64;
+                acc.recent_churn += (insertions + deletions) as u64;
                 acc.recent_changes += 1;
                 recent_changes += 1;
             }
@@ -121,42 +185,62 @@ pub fn analyze_repository_with(
                 acc.first_introduced = Some(commit.author.time);
             }
             acc.last_modified = Some(commit.author.time);
-            *acc.authors.entry(author_key.clone()).or_insert(0) += change.insertions as u64;
+            *acc.authors.entry(author_key.clone()).or_insert(0) += insertions as u64;
         }
     }
 
-    // 2. Current (HEAD) file list — for complexity and stability signals.
+    // 4. Current (HEAD) file list — for complexity and stability signals.
     let current_paths = repo.list_blobs(head_commit.tree_id)?;
     let current_set: std::collections::HashSet<PathBuf> = current_paths.iter().cloned().collect();
 
-    // 3. Normalize each signal to 0–100 across files (max-based scaling).
+    // 5. Line counts for every analyzed file (parallel blob reads, docs/13 §6).
+    let paths: Vec<PathBuf> = accs.keys().cloned().collect();
+    let chunk = paths.len().div_ceil(workers).max(1);
+    let locs: HashMap<PathBuf, u32> = analysis_pool().install(|| {
+        paths
+            .par_chunks(chunk)
+            .map(|chunk| {
+                let local = Repository::open(&git_dir)?;
+                let mut out = Vec::with_capacity(chunk.len());
+                for path in chunk {
+                    let loc = local
+                        .blob_at_path(head_commit.tree_id, path)
+                        .ok()
+                        .flatten()
+                        .map(|b| split_lines(&b).len() as u32)
+                        .unwrap_or(0);
+                    out.push((path.clone(), loc));
+                }
+                Ok(out)
+            })
+            .collect::<anyhow::Result<Vec<Vec<(PathBuf, u32)>>>>()
+            .map(|chunks| {
+                chunks
+                    .into_iter()
+                    .flatten()
+                    .collect::<HashMap<PathBuf, u32>>()
+            })
+    })?;
+
+    // 6. Normalize each signal to 0–100 across files (max-based scaling).
     let n = accs.len();
     let max_frequency = accs.values().map(|a| a.change_frequency).max().unwrap_or(0);
     let max_churn = accs.values().map(|a| a.recent_churn).max().unwrap_or(0);
     let max_bugs = accs.values().map(|a| a.bug_fix_count).max().unwrap_or(0);
-    let max_complexity = current_paths
-        .iter()
-        .filter_map(|p| repo.blob_at_path(head_commit.tree_id, p).ok().flatten())
-        .map(|b| split_lines(&b).len())
-        .max()
-        .unwrap_or(0);
+    let max_complexity = locs.values().copied().max().unwrap_or(0);
 
     let mut files = Vec::with_capacity(n);
     let mut recently_added = 0usize;
 
     for (path, acc) in &accs {
-        // Current line count of the file (complexity proxy, docs/10 §2).
-        let loc = repo
-            .blob_at_path(head_commit.tree_id, path)
-            .ok()
-            .flatten()
-            .map(|b| split_lines(&b).len() as u32)
-            .unwrap_or(0);
+        // Current line count of the file (complexity proxy, docs/10 §2),
+        // read in parallel during step 5.
+        let loc = locs.get(path).copied().unwrap_or(0);
 
         let n_frequency = scale(acc.change_frequency, max_frequency);
         let n_churn = scale(acc.recent_churn as u32, max_churn as u32);
         let n_bugs = scale(acc.bug_fix_count, max_bugs);
-        let n_complexity = scale(loc, max_complexity as u32);
+        let n_complexity = scale(loc, max_complexity);
 
         let ownership = ownership_concentration(&acc.authors);
         let hotspot = calculate_hotspot_score_with(
@@ -220,6 +304,13 @@ pub fn analyze_repository_with(
         current_set.len(),
     )?;
 
+    tracing::info!(
+        commits = total_commits,
+        files = files.len(),
+        workers,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "repository analysis complete"
+    );
     Ok(RepoAnalysis {
         total_commits,
         total_contributors: author_set.len(),

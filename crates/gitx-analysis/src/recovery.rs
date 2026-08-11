@@ -17,6 +17,32 @@ pub struct UnreachableCommit {
     pub oid: ObjectId,
 }
 
+/// A non-commit object (tree or blob) present in the object database but not
+/// reachable from any reference. Dangling blobs are typically the payload of
+/// `git add`-then-`git reset` accidents; dangling trees usually accompany
+/// unreachable commits (docs/12 §6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DanglingKind {
+    Tree,
+    Blob,
+}
+
+impl std::fmt::Display for DanglingKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DanglingKind::Tree => write!(f, "tree"),
+            DanglingKind::Blob => write!(f, "blob"),
+        }
+    }
+}
+
+/// A dangling tree or blob object.
+#[derive(Debug, Clone)]
+pub struct DanglingObject {
+    pub oid: ObjectId,
+    pub kind: DanglingKind,
+}
+
 /// The result of a recovery scan.
 #[derive(Debug, Clone, Default)]
 pub struct RecoveryReport {
@@ -24,6 +50,8 @@ pub struct RecoveryReport {
     pub reflog: Vec<ReflogEntry>,
     /// Commits not reachable from any ref.
     pub unreachable: Vec<UnreachableCommit>,
+    /// Dangling trees/blobs not reachable from any ref (bounded scan; docs/12 §6).
+    pub dangling: Vec<DanglingObject>,
     /// Whether the repository has reflogs at all.
     pub reflog_enabled: bool,
 }
@@ -89,14 +117,98 @@ fn collect_reachable(
     Ok(())
 }
 
+/// Find dangling trees and blobs: objects of those kinds present in the object
+/// database but not reachable from any reference's commit graph.
+///
+/// Reachability is computed from the reachable commit set (rev-walks of every
+/// branch/tag) and their trees. To stay bounded on large repositories the tree
+/// walk is capped at `max_trees` reachable commit trees (newest commits first);
+/// pass `None` to walk every reachable commit's tree.
+pub fn find_dangling_objects(
+    repo: &Repository,
+    max_trees: Option<usize>,
+    max_objects: Option<usize>,
+) -> gitx_git::Result<Vec<DanglingObject>> {
+    let mut reachable: HashSet<String> = HashSet::new();
+
+    // Commit reachability + the trees/blobs they contain.
+    let mut commits = Vec::new();
+    for branch in repo.branches()? {
+        commits.extend(repo.rev_walk(branch.target)?);
+    }
+    for tag in repo.tags()? {
+        commits.extend(repo.rev_walk(tag.target)?);
+    }
+    let mut walked = 0usize;
+    for id_res in commits {
+        let id = id_res?;
+        let oid = id.to_string();
+        if reachable.insert(oid.clone()) {
+            if let Some(max) = max_trees
+                && walked >= max
+            {
+                continue;
+            }
+            if let Ok(commit) = repo.find_commit(id) {
+                walked += 1;
+                if let Ok(trees) = repo.tree_oids(commit.tree_id) {
+                    for t in trees {
+                        reachable.insert(t.to_string());
+                    }
+                }
+                if let Ok(entries) = repo.tree_entries(commit.tree_id) {
+                    for (_, blob) in entries {
+                        reachable.insert(blob.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut dangling = Vec::new();
+    for (idx, id_res) in repo.all_object_ids()?.enumerate() {
+        if let Some(max) = max_objects
+            && idx >= max
+        {
+            break;
+        }
+        let id = id_res?;
+        let oid = id.to_string();
+        if reachable.contains(&oid) {
+            continue;
+        }
+        match repo.object_kind(id)? {
+            Some(ObjectKind::Tree) => dangling.push(DanglingObject {
+                oid: id,
+                kind: DanglingKind::Tree,
+            }),
+            Some(ObjectKind::Blob) => dangling.push(DanglingObject {
+                oid: id,
+                kind: DanglingKind::Blob,
+            }),
+            _ => {}
+        }
+    }
+    Ok(dangling)
+}
+
 /// Build a full recovery report.
 pub fn analyze_recovery(repo: &Repository) -> gitx_git::Result<RecoveryReport> {
+    tracing::info!("recovery scan start");
     let reflog = collect_reflog(repo)?;
     let unreachable = find_unreachable_commits(repo, None)?;
+    let dangling = find_dangling_objects(repo, None, None)?;
+    tracing::info!(
+        reflog_entries = reflog.len(),
+        unreachable_commits = unreachable.len(),
+        dangling_objects = dangling.len(),
+        "recovery scan complete"
+    );
     Ok(RecoveryReport {
         reflog_enabled: !reflog.is_empty(),
         reflog,
         unreachable,
+        dangling,
     })
 }
 
@@ -106,10 +218,12 @@ pub fn analyze_recovery(repo: &Repository) -> gitx_git::Result<RecoveryReport> {
 pub fn analyze_recovery_capped(repo: &Repository) -> gitx_git::Result<RecoveryReport> {
     let reflog = collect_reflog(repo)?;
     let unreachable = find_unreachable_commits(repo, Some(10_000))?;
+    let dangling = find_dangling_objects(repo, Some(200), Some(10_000))?;
     Ok(RecoveryReport {
         reflog_enabled: !reflog.is_empty(),
         reflog,
         unreachable,
+        dangling,
     })
 }
 

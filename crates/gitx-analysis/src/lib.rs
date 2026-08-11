@@ -1,4 +1,5 @@
 pub mod branch;
+pub mod cache;
 pub mod classification;
 pub mod health;
 pub mod hotspots;
@@ -7,6 +8,7 @@ pub mod metrics;
 pub mod ownership;
 pub mod pipeline;
 pub mod recovery;
+pub mod regressions;
 pub mod stats;
 
 // Re-export common types
@@ -20,5 +22,9 @@ pub use hotspots::{
 pub use metrics::FileMetrics;
 pub use ownership::OwnershipData;
 pub use pipeline::{FileAnalysis, RepoAnalysis, analyze_repository, analyze_repository_with};
-pub use recovery::{RecoveryReport, analyze_recovery, collect_reflog, find_unreachable_commits};
+pub use recovery::{
+    DanglingKind, DanglingObject, RecoveryReport, analyze_recovery, collect_reflog,
+    find_dangling_objects, find_unreachable_commits,
+};
+pub use regressions::{RegressionReport, analyze_regressions};
 pub use stats::{RepoStats, repository_stats};
