@@ -8,7 +8,29 @@ pub fn recovery(cli: &Cli, action: Option<RecoveryAction>) -> anyhow::Result<()>
         RecoveryAction::Reflog => reflog(cli),
         RecoveryAction::Unreachable => unreachable(cli),
         RecoveryAction::Show { oid } => show(cli, &oid),
+        RecoveryAction::Export { oid, output } => export(cli, &oid, output),
     }
+}
+
+/// Export a commit as a unified patch (docs/12 §6). Read-only: the patch is
+/// written to a file, never applied automatically.
+fn export(cli: &Cli, oid: &str, output: Option<std::path::PathBuf>) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let id = crate::commands::resolve_ref(&repo, oid)
+        .with_context(|| format!("invalid object id `{oid}`"))?;
+    let patch = gitx_git::diff::render_commit_patch(&repo, id)
+        .with_context(|| format!("cannot render patch for `{oid}`"))?;
+
+    let path = output.unwrap_or_else(|| {
+        std::path::PathBuf::from(format!("gitx-recovery-{}.patch", short_oid(&id)))
+    });
+    std::fs::write(&path, patch).with_context(|| format!("cannot write {}", path.display()))?;
+
+    if cli.json {
+        return print_json(&json!({"oid": oid, "exported_to": path.display().to_string()}));
+    }
+    println!("Exported {} to {}", short_oid(&id), path.display());
+    Ok(())
 }
 
 fn reflog(cli: &Cli) -> anyhow::Result<()> {
@@ -36,47 +58,112 @@ fn reflog(cli: &Cli) -> anyhow::Result<()> {
         println!("No reflog entries found (reflogs may be disabled).");
         return Ok(());
     }
-    println!("Reflog entries (newest first):");
+    let mut lines = vec!["Reflog entries (newest first):".to_string()];
     for e in entries.iter().take(100) {
-        println!(
+        lines.push(format!(
             "  {:<28} {} → {}  {}  {}",
             e.reference,
             short_oid(&e.previous_oid),
             short_oid(&e.new_oid),
             e.timestamp.map(format_ts).unwrap_or_else(|| "-".into()),
             e.message
-        );
+        ));
     }
-    Ok(())
+    crate::commands::paginate(lines)
 }
 
 pub fn unreachable(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
     let commits = gitx_analysis::find_unreachable_commits(&repo, None)?;
 
+    // Last known reference + reason from the reflog (docs/12 §5).
+    let reflog = gitx_analysis::collect_reflog(&repo).unwrap_or_default();
+    let last_known = |oid: &str| -> Option<(&str, &str)> {
+        reflog
+            .iter()
+            .rev()
+            .find(|e| e.new_oid.to_string() == oid || e.previous_oid.to_string() == oid)
+            .map(|e| (e.reference.as_str(), e.message.as_str()))
+    };
+
+    let now = chrono::Utc::now().timestamp();
+    let rows: Vec<serde_json::Value> = commits
+        .iter()
+        .map(|c| {
+            let (ref_name, msg) = last_known(&c.oid.to_string())
+                .map(|(r, m)| (Some(r.to_string()), Some(m.to_string())))
+                .unwrap_or((None, None));
+            let age = repo
+                .find_commit(c.oid)
+                .map(|cm| (now - cm.author.time).max(0) / 86_400)
+                .unwrap_or(0);
+            json!({
+                "oid": c.oid.to_string(),
+                "age_days": age,
+                "last_known_reference": ref_name,
+                "reason": if ref_name.is_some() { "reflog entry" } else { "no reflog trace" },
+                "reflog_message": msg,
+            })
+        })
+        .collect();
+
     if cli.json {
-        return print_json(&json!(
-            commits
-                .iter()
-                .map(|c| json!({"oid": c.oid.to_string()}))
-                .collect::<Vec<_>>()
-        ));
+        return print_json(&json!(rows));
     }
 
     if commits.is_empty() {
         println!("No unreachable commits found.");
-        return Ok(());
+    } else {
+        println!(
+            "{} unreachable commit(s) — candidates for `git gc`, recoverable via reflog:",
+            commits.len()
+        );
     }
-    println!(
-        "{} unreachable commit(s) — candidates for `git gc`, recoverable via reflog:",
-        commits.len()
-    );
     for commit in commits.iter().take(100) {
         let summary = repo
             .find_commit(commit.oid)
             .map(|c| c.message)
             .unwrap_or_else(|_| "?".into());
-        println!("  {}  {}", short_oid(&commit.oid), summary);
+        let (ref_name, reason) = last_known(&commit.oid.to_string())
+            .map(|(r, _)| (format!(" via {r}"), "reflog".to_string()))
+            .unwrap_or((String::new(), "no reflog trace".to_string()));
+        println!(
+            "  {}  {}  ({}d old, {reason}{ref_name})",
+            short_oid(&commit.oid),
+            summary,
+            (now - repo
+                .find_commit(commit.oid)
+                .map(|c| c.author.time)
+                .unwrap_or(now))
+            .max(0)
+                / 86_400
+        );
+    }
+    println!(
+        "\nNote: unreachable objects may be pruned by `git gc` — recoverability is not permanent (docs/12 §7)."
+    );
+
+    // Dangling trees/blobs (docs/12 §6): typically `git add`-then-`git reset`
+    // accidents and the trees of unreachable commits.
+    let dangling = gitx_analysis::find_dangling_objects(&repo, None, None).unwrap_or_default();
+    let trees = dangling
+        .iter()
+        .filter(|d| d.kind == gitx_analysis::DanglingKind::Tree)
+        .count();
+    let blobs = dangling
+        .iter()
+        .filter(|d| d.kind == gitx_analysis::DanglingKind::Blob)
+        .count();
+    if trees + blobs > 0 {
+        println!("\nDangling objects: {trees} tree(s), {blobs} blob(s)");
+        for d in dangling.iter().take(50) {
+            println!("  {:<7} {}", d.kind.to_string(), d.oid);
+        }
+        println!(
+            "  (dangling blobs are often staged-then-discarded content; recover them with `gitx recovery export` after re-attaching via `git cat-file`)"
+        );
+    } else {
+        println!("\nNo dangling trees or blobs.");
     }
     Ok(())
 }
@@ -106,10 +193,25 @@ fn show(cli: &Cli, oid: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn release(cli: &Cli, action: ReleaseAction) -> anyhow::Result<()> {
-    match action {
-        ReleaseAction::Show { tag } => release_show(cli, &tag),
-        ReleaseAction::Diff { from, to } => release_diff(cli, &from, &to),
+pub fn release(
+    cli: &Cli,
+    tag: Option<String>,
+    action: Option<ReleaseAction>,
+) -> anyhow::Result<()> {
+    match (tag, action) {
+        // `gitx release <TAG>` (docs/07 §17).
+        (Some(tag), None) => release_show(cli, &tag),
+        (Some(tag), Some(ReleaseAction::Show { tag: _ })) => release_show(cli, &tag),
+        (None, Some(ReleaseAction::Show { tag })) => release_show(cli, &tag),
+        (None, Some(ReleaseAction::Diff { from, to })) => release_diff(cli, &from, &to),
+        (Some(_), Some(ReleaseAction::Diff { .. })) => {
+            anyhow::bail!(
+                "provide either `gitx release <TAG>` or `gitx release diff <REF1> <REF2>`, not both"
+            )
+        }
+        (None, None) => {
+            anyhow::bail!("release requires a tag (`gitx release <TAG>`) or `diff <REF1> <REF2>`")
+        }
     }
 }
 
@@ -186,6 +288,49 @@ fn release_diff(cli: &Cli, from: &str, to: &str) -> anyhow::Result<()> {
         }
     }
 
+    // Release depth (docs/10 §12): contributors, classifications, top areas.
+    let mut contributors_set: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    let mut classifications: std::collections::BTreeMap<String, u32> =
+        std::collections::BTreeMap::new();
+    for commit in &new_commits {
+        contributors_set.insert(commit.author.name.clone());
+        let class = format!(
+            "{:?}",
+            gitx_analysis::classify_commit_message(&commit.message)
+        );
+        *classifications.entry(class).or_insert(0) += 1;
+    }
+    let mut areas: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+    for f in &files {
+        let dir = std::path::Path::new(f)
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "(root)".into());
+        *areas.entry(dir).or_insert(0) += 1;
+    }
+
+    // Top hotspots touched by this release window (docs/10 §12).
+    let hotspot_scores: std::collections::HashMap<String, (f64, &str)> =
+        gitx_analysis::analyze_repository(&repo)
+            .map(|a| {
+                a.files
+                    .iter()
+                    .map(|f| (f.path.display().to_string(), (f.hotspot, f.classification)))
+                    .collect()
+            })
+            .unwrap_or_default();
+    let mut touched_hotspots: Vec<(&String, f64, &str)> = files
+        .iter()
+        .filter_map(|f| {
+            hotspot_scores
+                .get(f)
+                .map(|(score, class)| (f, *score, *class))
+        })
+        .collect();
+    touched_hotspots.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
     if cli.json {
         return print_json(&json!({
             "from": from,
@@ -199,6 +344,10 @@ fn release_diff(cli: &Cli, from: &str, to: &str) -> anyhow::Result<()> {
             "files_changed": files.iter().collect::<Vec<_>>(),
             "insertions": insertions,
             "deletions": deletions,
+            "contributors": contributors_set.iter().collect::<Vec<_>>(),
+            "classifications": classifications.iter().map(|(k, v)| json!({k: v})).collect::<Vec<_>>(),
+            "top_areas": areas.iter().take(10).map(|(k, v)| json!({k: v})).collect::<Vec<_>>(),
+            "top_hotspots": touched_hotspots.iter().take(10).map(|(f, score, class)| json!({"file": f, "score": score, "classification": class})).collect::<Vec<_>>(),
         }));
     }
 
@@ -210,6 +359,21 @@ fn release_diff(cli: &Cli, from: &str, to: &str) -> anyhow::Result<()> {
         insertions,
         deletions
     );
+    println!(
+        "  contributors: {}",
+        contributors_set
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    if !classifications.is_empty() {
+        let summary: Vec<String> = classifications
+            .iter()
+            .map(|(k, v)| format!("{k} {v}"))
+            .collect();
+        println!("  classifications: {}", summary.join(", "));
+    }
     for commit in new_commits.iter().take(30) {
         println!(
             "    {} {}  {}",
@@ -217,6 +381,12 @@ fn release_diff(cli: &Cli, from: &str, to: &str) -> anyhow::Result<()> {
             format_ts(commit.author.time),
             commit.message
         );
+    }
+    if !touched_hotspots.is_empty() {
+        println!("  top hotspots touched (maintenance risk):");
+        for (f, score, class) in touched_hotspots.iter().take(5) {
+            println!("    {score:>4.0} {class:<4} {f}");
+        }
     }
     if files.len() > 10 {
         println!("  files ({} total):", files.len());

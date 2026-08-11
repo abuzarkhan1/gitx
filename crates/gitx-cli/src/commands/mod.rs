@@ -11,6 +11,7 @@ use crate::cli::{Cli, Commands};
 use anyhow::Context;
 
 pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
+    tracing::debug!(repo = ?cli.repo, json = cli.json, "gitx dispatch");
     // No subcommand → start the TUI (docs/07 §1). The TUI crate is a separate
     // binary today; surface a clear message instead of a silent no-op.
     if cli.command.is_none() {
@@ -43,24 +44,35 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
             since,
             lines,
         } => history::file_history(&cli, &path, follow, since, lines),
-        Commands::Blame { path } => history::blame(&cli, &path),
+        Commands::Blame { path, limit } => history::blame(&cli, &path, limit),
+        Commands::Lineage { path } => history::lineage(&cli, &path),
         Commands::Branches => history::branches(&cli),
         Commands::Branch { name } => history::branch(&cli, &name),
         Commands::Contributors => analysis::contributors(&cli),
         Commands::Contributor { name } => analysis::contributor(&cli, &name),
         Commands::Ownership { path } => analysis::ownership(&cli, path.as_deref()),
         Commands::Hotspots { limit, path } => analysis::hotspots(&cli, limit, path.as_deref()),
-        Commands::Architecture { action } => match action {
-            Some(crate::cli::ArchitectureAction::Diff { from, to }) => {
-                analysis::architecture_diff(&cli, &from, &to)
+        Commands::Architecture { from, to, action } => {
+            match (from, to) {
+                // `gitx architecture --from <R> --to <R>` (docs/07 §11).
+                (Some(from), Some(to)) => analysis::architecture_diff(&cli, &from, &to),
+                (Some(_), None) => anyhow::bail!("--from requires --to"),
+                (None, Some(_)) => anyhow::bail!("--to requires --from"),
+                (None, None) => match action {
+                    Some(crate::cli::ArchitectureAction::Diff { from, to }) => {
+                        analysis::architecture_diff(&cli, &from, &to)
+                    }
+                    _ => analysis::architecture(&cli),
+                },
             }
-            _ => analysis::architecture(&cli),
-        },
+        }
         Commands::Dependencies { action } => analysis::dependencies(&cli, action),
         Commands::Risk { path } => analysis::risk(&cli, path.as_deref()),
         Commands::Health => analysis::health(&cli),
+        Commands::Regressions { max } => analysis::regressions(&cli, max),
         Commands::Search {
             query,
+            since,
             commits,
             files,
             authors,
@@ -71,11 +83,22 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
             history,
             author,
         } => search::search(
-            &cli, &query, commits, files, authors, branches, tags, renames, code, history, author,
+            &cli,
+            &query,
+            since.as_deref(),
+            commits,
+            files,
+            authors,
+            branches,
+            tags,
+            renames,
+            code,
+            history,
+            author,
         ),
         Commands::Recovery { action } => recovery::recovery(&cli, action),
         Commands::Unreachable => recovery::unreachable(&cli),
-        Commands::Release { action } => recovery::release(&cli, action),
+        Commands::Release { tag, action } => recovery::release(&cli, tag, action),
         Commands::Config { action } => config::config_command(&cli, action),
         Commands::Completions { shell } => completions::completions(shell),
     }
@@ -104,19 +127,60 @@ pub fn format_ts(seconds: i64) -> String {
     }
 }
 
-/// Parse a user-supplied date: unix seconds or RFC3339.
+/// Parse a user-supplied date: unix seconds, RFC3339, or `YYYY-MM-DD`
+/// (midnight, local time — used by `gitx search --since`, docs/11 §4).
 pub fn parse_ts(input: &str) -> anyhow::Result<i64> {
     if let Ok(secs) = input.parse::<i64>() {
         return Ok(secs);
     }
-    let dt = chrono::DateTime::parse_from_rfc3339(input)
-        .with_context(|| format!("invalid date `{input}` (use RFC3339 or unix seconds)"))?;
+    // Date-only: YYYY-MM-DD.
+    if let Ok(dt) = chrono::NaiveDate::parse_from_str(input, "%Y-%m-%d") {
+        return Ok(dt
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight")
+            .and_utc()
+            .timestamp());
+    }
+    let dt = chrono::DateTime::parse_from_rfc3339(input).with_context(|| {
+        format!("invalid date `{input}` (use RFC3339, YYYY-MM-DD, or unix seconds)")
+    })?;
     Ok(dt.timestamp())
 }
 
 /// Emit JSON on stdout (docs/07 §18: JSON output must not mix with decorative output).
 pub fn print_json(value: &serde_json::Value) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
+/// Long-output pagination (docs/25): when stdout is a terminal and more than
+/// 40 rows are being printed, pipe through `less -R` so output is paged like
+/// `git log`. Non-TTY stdout (scripts, CI, pipes) and short outputs print
+/// directly, and if `less` is unavailable the full output is printed anyway
+/// (never truncate data).
+pub fn paginate(lines: Vec<String>) -> anyhow::Result<()> {
+    use std::io::{IsTerminal, Write};
+    if !std::io::stdout().is_terminal() || lines.len() <= 40 {
+        for line in lines {
+            println!("{line}");
+        }
+        return Ok(());
+    }
+    if let Ok(mut child) = std::process::Command::new("less")
+        .arg("-R")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        if let Some(mut stdin) = child.stdin.take() {
+            let text = lines.join("\n") + "\n";
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        let _ = child.wait();
+        return Ok(());
+    }
+    for line in lines {
+        println!("{line}");
+    }
     Ok(())
 }
 

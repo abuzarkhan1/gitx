@@ -1,51 +1,63 @@
 use crate::cli::{Cli, DependenciesAction};
-use crate::commands::config::load_config;
+use crate::commands::config::{load_config, load_config_for};
 use crate::commands::{format_ts, open_repo, print_json};
 use gitx_analysis::{FileAnalysis, HotspotWeights, analyze_repository_with};
 use serde_json::json;
 use std::collections::HashMap;
 
-/// Analysis weights from the effective configuration (docs/16 §3), falling
-/// back to the documented defaults when no config file exists.
+/// Analysis weights from the effective configuration (docs/16 §3–§5): global
+/// config overlaid by a repository `gitx.toml` when present, falling back to
+/// the documented defaults.
 fn weights(cli: &Cli) -> HotspotWeights {
-    let analysis = match load_config(cli) {
-        Ok(c) => c.analysis,
-        Err(_) => return HotspotWeights::default(),
+    let config = match open_repo(cli)
+        .ok()
+        .map(|repo| load_config_for(cli, &repo))
+        .transpose()
+    {
+        Ok(Some(c)) => c,
+        _ => load_config(cli).unwrap_or_default(),
     };
     HotspotWeights {
-        change_frequency: analysis.hotspot_change_frequency_weight,
-        recent_churn: analysis.hotspot_recent_churn_weight,
-        bug_fix: analysis.hotspot_bug_fix_weight,
-        ownership: analysis.hotspot_ownership_weight,
-        complexity: analysis.hotspot_complexity_weight,
+        change_frequency: config.analysis.hotspot_change_frequency_weight,
+        recent_churn: config.analysis.hotspot_recent_churn_weight,
+        bug_fix: config.analysis.hotspot_bug_fix_weight,
+        ownership: config.analysis.hotspot_ownership_weight,
+        complexity: config.analysis.hotspot_complexity_weight,
     }
 }
 
 pub fn contributors(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
     let head = repo.head_commit_id()?;
+    let config = crate::commands::config::load_config_for(cli, &repo)?;
+    let mappings = &config.identity.mappings;
 
-    let mut stats: HashMap<String, (u64, i64, i64)> = HashMap::new(); // key -> (commits, first, last)
+    // Group by the canonical identity key (docs/05 §3): lowercased email, with
+    // the display name resolved through explicit user mappings when configured.
+    let mut stats: HashMap<String, (String, u64, i64, i64)> = HashMap::new();
     for id_res in repo.rev_walk(head)? {
         let commit = repo.find_commit(id_res?)?;
-        let key = format!("{} <{}>", commit.author.name, commit.author.email);
-        let entry = stats.entry(key).or_insert((0, i64::MAX, i64::MIN));
-        entry.0 += 1;
-        entry.1 = entry.1.min(commit.author.time);
-        entry.2 = entry.2.max(commit.author.time);
+        let id = gitx_core::identity::resolve(mappings, &commit.author.name, &commit.author.email);
+        let entry = stats
+            .entry(id.key)
+            .or_insert((id.display_name, 0, i64::MAX, i64::MIN));
+        entry.1 += 1;
+        entry.2 = entry.2.min(commit.author.time);
+        entry.3 = entry.3.max(commit.author.time);
     }
 
-    let mut list: Vec<(String, u64, i64, i64)> = stats
+    let mut list: Vec<(String, String, u64, i64, i64)> = stats
         .into_iter()
-        .map(|(k, (commits, first, last))| (k, commits, first, last))
+        .map(|(key, (name, commits, first, last))| (key, name, commits, first, last))
         .collect();
-    list.sort_by_key(|(_, commits, _, _)| std::cmp::Reverse(*commits));
+    list.sort_by_key(|(_, _, commits, _, _)| std::cmp::Reverse(*commits));
 
     if cli.json {
         return print_json(&json!(
             list.iter()
-                .map(|(key, commits, first, last)| json!({
-                    "author": key,
+                .map(|(key, name, commits, first, last)| json!({
+                    "key": key,
+                    "author": name,
                     "commits": commits,
                     "first_activity": first,
                     "last_activity": last,
@@ -55,10 +67,13 @@ pub fn contributors(cli: &Cli) -> anyhow::Result<()> {
     }
 
     println!("Contributors");
-    for (key, commits, first, last) in list {
+    for (key, name, commits, first, last) in list {
+        let mut label = format!("{name} <{key}>");
+        if label.len() > 46 {
+            label.truncate(46);
+        }
         println!(
-            "  {:<40} {:>6} commits   {} → {}",
-            key,
+            "  {label:<46} {:>6} commits   {} → {}",
             commits,
             format_ts(first),
             format_ts(last)
@@ -166,12 +181,112 @@ pub fn ownership(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
             top_str
         );
     }
+
+    // Subsystem ownership (docs/10 §4): aggregate ownership per directory.
+    let mut author_lines_by_path: std::collections::HashMap<
+        std::path::PathBuf,
+        std::collections::HashMap<String, u64>,
+    > = std::collections::HashMap::new();
+    for f in &analysis.files {
+        author_lines_by_path.insert(f.path.clone(), f.author_lines.clone());
+    }
+    let subsystems = gitx_analysis::branch::subsystem_ownership(&author_lines_by_path);
+    println!("\nSubsystem ownership (per directory)");
+    for (dir, total, top, concentration) in subsystems.iter().take(10) {
+        println!(
+            "  {concentration:>5.1}%  {:<40} {total:>8} lines  top: {top}",
+            dir.chars().take(40).collect::<String>()
+        );
+    }
+
+    // Knowledge concentration + inactive ownership (docs/10 §4): per-author
+    // last activity from a single history walk.
+    let mut author_last: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    if let Ok(head) = repo.head_commit_id() {
+        for id_res in repo.rev_walk(head)? {
+            if let Ok(commit) = repo.find_commit(id_res?) {
+                let key = format!("{} <{}>", commit.author.name, commit.author.email);
+                let entry = author_last.entry(key).or_insert(commit.author.time);
+                *entry = (*entry).max(commit.author.time);
+            }
+        }
+    }
+    let cutoff = chrono::Utc::now().timestamp() - 30 * 86_400;
+
+    let knowledge: Vec<&FileAnalysis> = files
+        .iter()
+        .copied()
+        .filter(|f| f.ownership_concentration >= 85.0 && f.metrics.unique_contributors > 1)
+        .collect();
+    println!("\nKnowledge concentration (bus-factor risk, ≥85% single owner)");
+    for f in knowledge.iter().take(10) {
+        let top = f
+            .author_lines
+            .iter()
+            .max_by_key(|(_, v)| *v)
+            .map(|(a, _)| a);
+        println!(
+            "  {:.0}%  {}  owned by {}",
+            f.ownership_concentration,
+            f.path.display(),
+            top.map(String::as_str).unwrap_or("-")
+        );
+    }
+
+    let inactive: Vec<&FileAnalysis> = files
+        .iter()
+        .copied()
+        .filter(|f| {
+            f.author_lines
+                .iter()
+                .max_by_key(|(_, v)| *v)
+                .and_then(|(a, _)| author_last.get(a))
+                .map(|&t| t < cutoff)
+                .unwrap_or(false)
+        })
+        .collect();
+    println!("\nInactive ownership (top owner idle >30d)");
+    for f in inactive.iter().take(10) {
+        let top = f
+            .author_lines
+            .iter()
+            .max_by_key(|(_, v)| *v)
+            .map(|(a, _)| a);
+        println!(
+            "  {}  top owner {}",
+            f.path.display(),
+            top.map(String::as_str).unwrap_or("-")
+        );
+    }
     Ok(())
+}
+
+/// Analysis results from the persisted index when it is fresh (docs/13 §3),
+/// otherwise `None` (callers compute live). `--no-cache` forces live.
+fn analysis_from_cache(cli: &Cli, repo: &gitx_git::Repository) -> Option<gitx_analysis::RepoAnalysis> {
+    if cli.no_cache {
+        return None;
+    }
+    let path = crate::commands::index::default_index_path(repo);
+    if !path.exists() {
+        return None;
+    }
+    let conn = rusqlite::Connection::open(&path).ok()?;
+    if gitx_storage::migrations::ensure_schema_compatible(&conn).is_err() {
+        return None;
+    }
+    if !gitx_analysis::cache::is_fresh(&conn, repo) {
+        return None;
+    }
+    gitx_analysis::cache::load(&conn).ok().flatten()
 }
 
 pub fn hotspots(cli: &Cli, limit: usize, path: Option<&str>) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
-    let analysis = analyze_repository_with(&repo, weights(cli))?;
+    let analysis = match analysis_from_cache(cli, &repo) {
+        Some(a) => a,
+        None => analyze_repository_with(&repo, weights(cli))?,
+    };
 
     let files: Vec<&FileAnalysis> = analysis
         .files
@@ -212,7 +327,10 @@ pub fn hotspots(cli: &Cli, limit: usize, path: Option<&str>) -> anyhow::Result<(
 
 pub fn risk(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
-    let analysis = analyze_repository_with(&repo, weights(cli))?;
+    let analysis = match analysis_from_cache(cli, &repo) {
+        Some(a) => a,
+        None => analyze_repository_with(&repo, weights(cli))?,
+    };
 
     let files: Vec<&FileAnalysis> = match path {
         Some(p) => analysis
@@ -233,7 +351,8 @@ pub fn risk(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
         ));
     }
 
-    // Docs/10 §3: risk output must show evidence, never a bare number.
+    // Docs/10 §3 + §13: risk output must show evidence and its formula and
+    // time window, never a bare number.
     for f in &files {
         println!("⚠ {}  (risk {:.0}/100)", f.path.display(), f.risk);
         println!("   change frequency     {}", f.metrics.change_frequency);
@@ -244,13 +363,20 @@ pub fn risk(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
         println!("   bug-fix commits      {}", f.metrics.bug_fix_count);
         println!("   contributors         {}", f.metrics.unique_contributors);
         println!("   ownership conc.      {:.0}%", f.ownership_concentration);
+        println!(
+            "   formula              risk = (hotspot + ownership + churn30d + complexity) / 4"
+        );
+        println!("   time window          full history; churn over last 30 days");
     }
     Ok(())
 }
 
 pub fn health(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
-    let analysis = analyze_repository_with(&repo, weights(cli))?;
+    let analysis = match analysis_from_cache(cli, &repo) {
+        Some(a) => a,
+        None => analyze_repository_with(&repo, weights(cli))?,
+    };
     let h = &analysis.health;
 
     if cli.json {
@@ -311,6 +437,11 @@ pub fn health(cli: &Cli) -> anyhow::Result<()> {
         analysis.files.len(),
         analysis.analysis_duration_ms
     );
+    // Explainability contract (docs/10 §13): formula, time window, and the
+    // classification bands used for every sub-score.
+    println!("  Formula: overall = Σ(weight_i × sub_score_i), each sub-score normalized 0–100");
+    println!("  Time window: full history; churn/activity signals over the last 30 days");
+    println!("  Bands: 0–30 LOW · 31–60 MEDIUM · 61–80 HIGH · 81–100 CRITICAL");
     Ok(())
 }
 
@@ -467,7 +598,118 @@ pub fn dependencies(cli: &Cli, action: Option<DependenciesAction>) -> anyhow::Re
         DependenciesAction::List => dependencies_list(cli),
         DependenciesAction::History { max } => dependencies_history(cli, max),
         DependenciesAction::Diff { from, to } => dependencies_diff(cli, &from, &to),
+        DependenciesAction::Workspace => dependencies_workspace(cli),
+        DependenciesAction::Usage { max } => dependencies_usage(cli, max),
     }
+}
+
+/// Dependency usage + churn (docs/10 §11): for each declared dependency,
+/// count the source files referencing it in HEAD, and count how often the
+/// dependency changed across the last `max` commits of the mainline.
+pub fn dependencies_usage(cli: &Cli, max: usize) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let head = repo.head_commit_id()?;
+    let head_commit = repo.find_commit(head)?;
+
+    let mut declared: Vec<gitx_analysis::manifest::Dependency> = Vec::new();
+    for (_, deps) in gitx_analysis::manifest::head_dependencies_at(&repo, head_commit.tree_id)? {
+        declared.extend(deps);
+    }
+    let usage = gitx_analysis::manifest::usage_counts(&repo, head_commit.tree_id, &declared)?;
+
+    // Churn: add/remove/version-change events per dependency across the walk.
+    let mut churn: HashMap<String, u64> = HashMap::new();
+    let mut prior: HashMap<String, Vec<gitx_analysis::manifest::Dependency>> = HashMap::new();
+    let walk: Vec<gitx_git::models::ObjectId> = repo
+        .rev_walk(head)?
+        .collect::<gitx_git::Result<Vec<_>>>()?
+        .into_iter()
+        .take(max)
+        .rev()
+        .collect();
+    for id in walk {
+        let commit = repo.find_commit(id)?;
+        for (path, current) in gitx_analysis::manifest::head_dependencies_at(&repo, commit.tree_id)?
+        {
+            let key = path.display().to_string();
+            let before = prior.get(&key).cloned().unwrap_or_default();
+            let (added, removed, changed) =
+                gitx_analysis::manifest::diff_dependencies(&before, &current);
+            for d in added.into_iter().chain(removed) {
+                *churn.entry(d.name.clone()).or_insert(0) += 1;
+            }
+            for (_, a) in changed {
+                *churn.entry(a.name.clone()).or_insert(0) += 1;
+            }
+            prior.insert(key, current);
+        }
+    }
+
+    // Merge usage and churn per dependency name.
+    let mut rows: Vec<(String, u64, u64)> = usage
+        .into_iter()
+        .map(|(name, files)| {
+            let changes = churn.get(&name).copied().unwrap_or(0);
+            (name, files, changes)
+        })
+        .collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)).then(a.0.cmp(&b.0)));
+
+    if cli.json {
+        return print_json(&json!(
+            rows.iter()
+                .map(|(name, files, changes)| json!({
+                    "name": name,
+                    "files_referencing": files,
+                    "changes": changes,
+                }))
+                .collect::<Vec<_>>()
+        ));
+    }
+
+    if rows.is_empty() {
+        println!("No supported dependency manifests found in HEAD.");
+        return Ok(());
+    }
+    println!("Dependency usage (files referencing) and churn (changes in last {max} commits):");
+    for (name, files, changes) in rows {
+        println!("  {:<32} {:>4} files   {:>3} changes", name, files, changes);
+    }
+    Ok(())
+}
+
+/// Workspace layout for monorepos (docs/10 §11 workspace-aware resolution).
+pub fn dependencies_workspace(cli: &Cli) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let head = repo.head_commit_id()?;
+    let head_commit = repo.find_commit(head)?;
+    let ws = gitx_analysis::manifest::detect_workspace(&repo, head_commit.tree_id)?;
+
+    if cli.json {
+        return print_json(&json!({
+            "kind": format!("{:?}", ws.kind),
+            "root": ws.root.as_ref().map(|p| p.display().to_string()),
+            "members": ws.members.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+        }));
+    }
+
+    if ws.kind == gitx_analysis::manifest::WorkspaceKind::None {
+        println!("No workspace detected (single-package repository).");
+        return Ok(());
+    }
+    println!(
+        "Workspace: {:?}  root: {}",
+        ws.kind,
+        ws.root
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "-".into())
+    );
+    println!("  members ({}):", ws.members.len());
+    for member in &ws.members {
+        println!("    {}", member.display());
+    }
+    Ok(())
 }
 
 /// Dependency overview from declared manifests + lockfiles in the HEAD tree.
@@ -651,6 +893,65 @@ pub fn dependencies_diff(cli: &Cli, from: &str, to: &str) -> anyhow::Result<()> 
         println!("    (no dependency changes)");
     }
     Ok(())
+}
+
+/// Recurring bug-fix and regression areas (docs/10 §9).
+pub fn regressions(cli: &Cli, max: usize) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let report = gitx_analysis::analyze_regressions(&repo, Some(max))?;
+
+    if cli.json {
+        return print_json(&json!(report));
+    }
+
+    println!(
+        "Regression analysis — {} commits, {} fix-classified, {} reverts (heuristic, docs/10 §9)",
+        report.total_commits, report.total_fixes, report.total_reverts
+    );
+    println!();
+    println!("Recurring problem areas (highest fix density first):");
+    if report.problem_files.is_empty() {
+        println!("  (no fix-classified commits found)");
+    }
+    for f in report.problem_files.iter().take(25) {
+        println!(
+            "  {:>5.0}%  {:<44} {} fixes / {} changes  {} reverts",
+            f.fix_density * 100.0,
+            f.path
+                .display()
+                .to_string()
+                .chars()
+                .take(44)
+                .collect::<String>(),
+            f.fix_commits,
+            f.total_changes,
+            f.reverts
+        );
+    }
+    if !report.reverts.is_empty() {
+        println!();
+        println!("Reverts (possible regressions):");
+        for r in report.reverts.iter().take(20) {
+            let gap = r
+                .gap_seconds
+                .map(|s| format!("{}s after", s))
+                .unwrap_or_else(|| "unknown gap".into());
+            println!(
+                "  {:<9} reverts {}  ({} files, {gap})",
+                short_oid_str(&r.revert_oid),
+                r.reverted_oid
+                    .as_deref()
+                    .map(short_oid_str)
+                    .unwrap_or_else(|| "?".into()),
+                r.paths.len()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn short_oid_str(oid: &str) -> String {
+    oid.chars().take(7).collect()
 }
 
 fn file_json(f: &FileAnalysis) -> serde_json::Value {

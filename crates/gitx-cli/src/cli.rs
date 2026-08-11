@@ -62,6 +62,13 @@ pub enum Commands {
         #[command(subcommand)]
         action: IndexAction,
     },
+    /// Line-level attribution for a file.
+    Blame {
+        path: String,
+        /// Maximum number of lines to attribute (paginated; docs/07 §7).
+        #[arg(long, default_value_t = 500)]
+        limit: usize,
+    },
     /// Commit timeline.
     Timeline {
         /// Only commits whose author name/email contains this.
@@ -98,8 +105,9 @@ pub enum Commands {
         #[arg(long)]
         lines: bool,
     },
-    /// Line-level attribution for a file.
-    Blame { path: String },
+    /// Life of a file: every commit that touched it, following renames
+    /// (docs/10 file archaeology).
+    Lineage { path: String },
     /// List branches.
     Branches,
     /// Show a single branch.
@@ -124,6 +132,13 @@ pub enum Commands {
     },
     /// Directory/module evolution overview and structural diffs.
     Architecture {
+        /// Diff from this ref (implies `--to`; equivalent to
+        /// `architecture diff <from> <to>`).
+        #[arg(long)]
+        from: Option<String>,
+        /// Diff to this ref (implies `--from`).
+        #[arg(long)]
+        to: Option<String>,
         #[command(subcommand)]
         action: Option<ArchitectureAction>,
     },
@@ -136,9 +151,18 @@ pub enum Commands {
     Risk { path: Option<String> },
     /// Composite repository health with all six sub-scores.
     Health,
+    /// Recurring bug-fix and regression areas (docs/10 §9).
+    Regressions {
+        /// Maximum number of commits to analyze.
+        #[arg(long, default_value_t = 2000)]
+        max: usize,
+    },
     /// Search commits, files, authors, branches and tags.
     Search {
         query: String,
+        /// Only commits at or after this date (RFC3339 or unix seconds).
+        #[arg(long)]
+        since: Option<String>,
         /// Search commit messages only.
         #[arg(long)]
         commits: bool,
@@ -175,10 +199,13 @@ pub enum Commands {
     /// Commits present in the object database but unreachable from any ref.
     Unreachable,
     /// Release information: a tag's commits, or the diff between two refs
-    /// (docs/07 §17).
+    /// (docs/07 §17). `gitx release <TAG>` is shorthand for
+    /// `gitx release show <TAG>`.
     Release {
+        /// Tag to inspect (equivalent to `release show <TAG>`).
+        tag: Option<String>,
         #[command(subcommand)]
-        action: ReleaseAction,
+        action: Option<ReleaseAction>,
     },
     /// Show or initialize the configuration (docs/16).
     Config {
@@ -205,6 +232,15 @@ pub enum DependenciesAction {
     },
     /// Dependency diff between two refs (branch, tag, or commit id).
     Diff { from: String, to: String },
+    /// Show the workspace layout (root + members) for monorepos.
+    Workspace,
+    /// Dependency usage + churn: how many files reference each dependency,
+    /// and how often it was added/removed/version-changed (docs/10 §11).
+    Usage {
+        /// Maximum number of commits to scan for churn.
+        #[arg(long, default_value_t = 500)]
+        max: usize,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -249,4 +285,11 @@ pub enum RecoveryAction {
     Unreachable,
     /// Show a commit (or any object) by id.
     Show { oid: String },
+    /// Export a commit as a unified patch (read-only; docs/12 §6).
+    Export {
+        oid: String,
+        /// Write the patch to this file (default: `gitx-recovery-<oid>.patch`).
+        #[arg(long, value_name = "PATH")]
+        output: Option<std::path::PathBuf>,
+    },
 }

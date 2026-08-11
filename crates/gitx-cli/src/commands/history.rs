@@ -49,22 +49,24 @@ pub fn timeline(
                     "email": c.author.email,
                     "time": c.author.time,
                     "message": c.message,
-                    "parents": c.parents.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
-                }))
+                    "parents": c.parents.iter().map(|p| p.to_string()).collect::<Vec<_>>(),                }))
                 .collect::<Vec<_>>()
         ));
     }
 
-    for commit in commits {
-        println!(
-            "{} {}  {}  {}",
-            short_oid(&commit.id),
-            format_ts(commit.author.time),
-            commit.author.name,
-            commit.message
-        );
-    }
-    Ok(())
+    let lines: Vec<String> = commits
+        .iter()
+        .map(|c| {
+            format!(
+                "{} {}  {}  {}",
+                short_oid(&c.id),
+                format_ts(c.author.time),
+                c.author.name,
+                c.message
+            )
+        })
+        .collect();
+    crate::commands::paginate(lines)
 }
 
 pub fn commit(cli: &Cli, oid: &str) -> anyhow::Result<()> {
@@ -156,7 +158,8 @@ pub fn file_history(
     let path_buf = PathBuf::from(path);
 
     if lines {
-        return blame_inner(cli, path_buf);
+        // `history --lines` is paginated like `blame` (docs/07 §7).
+        return blame_inner(cli, path_buf, 500);
     }
 
     let commits = service.timeline(TimelineOptions {
@@ -195,21 +198,69 @@ pub fn file_history(
     Ok(())
 }
 
-pub fn blame(cli: &Cli, path: &str) -> anyhow::Result<()> {
-    blame_inner(cli, PathBuf::from(path))
+pub fn blame(cli: &Cli, path: &str, limit: usize) -> anyhow::Result<()> {
+    blame_inner(cli, PathBuf::from(path), limit)
 }
 
-fn blame_inner(cli: &Cli, path: PathBuf) -> anyhow::Result<()> {
+/// File lineage: every commit that touched the file, following renames
+/// (docs/10 file archaeology).
+pub fn lineage(cli: &Cli, path: &str) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let service = HistoryService::new(&repo);
+    let result = service
+        .get_file_lineage(PathBuf::from(path), None)
+        .with_context(|| format!("cannot trace lineage of {}", path))?;
+
+    if cli.json {
+        return print_json(&json!(
+            result
+                .history
+                .iter()
+                .map(|node| json!({
+                    "commit": node.commit_id.to_string(),
+                    "path": node.path.display().to_string(),
+                    "action": format!("{:?}", node.action),
+                }))
+                .collect::<Vec<_>>()
+        ));
+    }
+
+    if result.history.is_empty() {
+        println!("No history found for {path}.");
+        return Ok(());
+    }
+    println!("Lineage of {path} (newest first):");
+    for node in &result.history {
+        let action = match &node.action {
+            gitx_history::FileAction::Added => "added   ".to_string(),
+            gitx_history::FileAction::Modified => "modified".to_string(),
+            gitx_history::FileAction::Deleted => "deleted ".to_string(),
+            gitx_history::FileAction::Renamed { from } => {
+                format!("renamed from {}", from.display())
+            }
+        };
+        println!(
+            "  {}  {}  {}",
+            short_oid(&node.commit_id),
+            format_ts(repo.find_commit(node.commit_id)?.author.time),
+            action
+        );
+    }
+    Ok(())
+}
+
+fn blame_inner(cli: &Cli, path: PathBuf, limit: usize) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
     let service = HistoryService::new(&repo);
     let result = service
         .blame(path.clone(), None)
         .with_context(|| format!("cannot blame {}", path.display()))?;
+    // Paginate (docs/07 §7: blame is expensive and must be paginated).
+    let lines = result.lines.iter().take(limit).collect::<Vec<_>>();
 
     if cli.json {
         return print_json(&json!(
-            result
-                .lines
+            lines
                 .iter()
                 .map(|l| json!({
                     "line": l.line_no,
@@ -220,7 +271,7 @@ fn blame_inner(cli: &Cli, path: PathBuf) -> anyhow::Result<()> {
         ));
     }
 
-    for line in &result.lines {
+    for line in lines {
         println!(
             "{} {:>5} | {}",
             short_oid(&line.commit_id),
@@ -235,31 +286,68 @@ pub fn branches(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
     let branches = repo.branches()?;
 
-    if cli.json {
-        return print_json(&json!(
+    // Intelligence per local branch vs the default branch (docs/07 §8,
+    // docs/10 §5): ahead/behind, age, stale flag.
+    let default_name = branches
+        .iter()
+        .find(|b| b.name == "main" || b.name == "master")
+        .map(|b| b.name.clone())
+        .or_else(|| {
             branches
                 .iter()
-                .map(|b| json!({
-                    "name": b.name,
-                    "tip": b.target.to_string(),
-                    "is_remote": b.is_remote,
-                }))
-                .collect::<Vec<_>>()
-        ));
-    }
+                .find(|b| !b.is_remote)
+                .map(|b| b.name.clone())
+        });
 
-    for branch in branches {
-        let mark = if branch.is_remote {
-            "[remote]"
-        } else {
-            "[local] "
-        };
-        let tip = short_oid(&branch.target);
+    let mut rows: Vec<serde_json::Value> = Vec::new();
+    for branch in &branches {
+        let base = default_name
+            .as_deref()
+            .and_then(|d| branches.iter().find(|b| b.name == d));
+        let intelligence = gitx_analysis::branch::branch_intelligence(&repo, branch, base)
+            .ok()
+            .flatten();
+        let (ahead, behind, age_days, is_stale) = intelligence
+            .as_ref()
+            .map(|i| (i.ahead, i.behind, i.branch_age_days, i.is_stale))
+            .unwrap_or((0, 0, 0, false));
         let activity = repo
             .find_commit(branch.target)
             .map(|c| format_ts(c.author.time))
             .unwrap_or_else(|_| "?".into());
-        println!("{mark} {:<24} {tip}  last activity {activity}", branch.name);
+        rows.push(json!({
+            "name": branch.name,
+            "tip": branch.target.to_string(),
+            "is_remote": branch.is_remote,
+            "ahead": ahead,
+            "behind": behind,
+            "age_days": age_days,
+            "is_stale": is_stale,
+            "last_activity": activity,
+        }));
+
+        if !cli.json {
+            let mark = if branch.is_remote {
+                "[remote]"
+            } else {
+                "[local] "
+            };
+            let stale = if is_stale { "  STALE" } else { "" };
+            let vs = if branch.is_remote || default_name.as_deref() == Some(branch.name.as_str()) {
+                String::new()
+            } else {
+                format!("  ahead {ahead} behind {behind}")
+            };
+            println!(
+                "{mark} {:<24} {}  {age_days:>4}d old  {}{vs}{stale}",
+                branch.name,
+                short_oid(&branch.target),
+                activity
+            );
+        }
+    }
+    if cli.json {
+        return print_json(&json!(rows));
     }
     Ok(())
 }
@@ -304,6 +392,15 @@ pub fn branch(cli: &Cli, name: &str) -> anyhow::Result<()> {
         _ => (0, 0),
     };
 
+    // Shared files + merge-complexity estimate (docs/10 §5; the estimate is
+    // labeled as such, never a conflict guarantee).
+    let base_branch = default_name
+        .as_deref()
+        .and_then(|d| branches.iter().find(|b| b.name == d));
+    let intelligence = gitx_analysis::branch::branch_intelligence(&repo, branch, base_branch)
+        .ok()
+        .flatten();
+
     if cli.json {
         return print_json(&json!({
             "name": branch.name,
@@ -316,6 +413,11 @@ pub fn branch(cli: &Cli, name: &str) -> anyhow::Result<()> {
             "behind": behind,
             "divergence": ahead + behind,
             "default_branch": default_name,
+            "age_days": intelligence.as_ref().map(|i| i.branch_age_days),
+            "recent_activity_days": intelligence.as_ref().map(|i| i.recent_activity_days),
+            "shared_files": intelligence.as_ref().map(|i| i.shared_files),
+            "is_stale": intelligence.as_ref().map(|i| i.is_stale),
+            "merge_complexity_estimate": intelligence.as_ref().map(|i| i.merge_complexity),
         }));
     }
 
@@ -327,6 +429,9 @@ pub fn branch(cli: &Cli, name: &str) -> anyhow::Result<()> {
     );
     println!("  commits    : {commit_count}");
     println!("  activity   : {}", format_ts(tip.author.time));
+    if let Some(i) = &intelligence {
+        println!("  age        : {} days", i.branch_age_days);
+    }
     if let Some(default) = &default_name
         && default != name
     {
@@ -334,6 +439,13 @@ pub fn branch(cli: &Cli, name: &str) -> anyhow::Result<()> {
             "  vs {default:<24} ahead {ahead} | behind {behind} | divergence {}",
             ahead + behind
         );
+        if let Some(i) = &intelligence {
+            println!("  shared files: {} changed on both sides", i.shared_files);
+            println!("  merge complexity (estimate): {:.1}", i.merge_complexity);
+        }
+    }
+    if intelligence.as_ref().map(|i| i.is_stale).unwrap_or(false) {
+        println!("  note       : stale (no recent activity)");
     }
     if branch.is_remote {
         println!("  origin     : remote-tracking");

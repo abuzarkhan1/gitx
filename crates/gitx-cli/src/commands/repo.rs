@@ -71,7 +71,38 @@ pub fn status(cli: &Cli) -> anyhow::Result<()> {
 
 pub fn stats(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
-    let stats = gitx_analysis::repository_stats(&repo)?;
+    // Index-backed fast path (docs/13 §3): with a fresh index the statistics
+    // come from SQLite in milliseconds instead of recomputing from Git.
+    let from_index = crate::commands::index::stats_from_index(&repo)
+        .ok()
+        .flatten();
+    let (stats, source) = match from_index {
+        Some(s) => (
+            gitx_analysis::RepoStats {
+                commits: s.commits,
+                contributors: s.contributors as usize,
+                files: s.files as usize,
+                branches: s.branches as usize,
+                tags: s.tags as usize,
+                age_days: s.age_days as i64,
+                first_commit: s.first_commit,
+                last_commit: s.latest_commit,
+                head_oid: repo.head_commit_id().ok().map(|id| id.to_string()),
+                head_message: repo
+                    .head_commit_id()
+                    .ok()
+                    .and_then(|id| repo.find_commit(id).ok())
+                    .map(|c| c.message),
+                languages: s
+                    .languages
+                    .into_iter()
+                    .map(|(ext, count)| (ext, count as usize))
+                    .collect(),
+            },
+            "index",
+        ),
+        None => (gitx_analysis::repository_stats(&repo)?, "live"),
+    };
 
     if cli.json {
         return print_json(&json!({
@@ -87,7 +118,7 @@ pub fn stats(cli: &Cli) -> anyhow::Result<()> {
         }));
     }
 
-    println!("Repository statistics");
+    println!("Repository statistics (source: {source})");
     println!("  commits      : {}", stats.commits);
     println!("  contributors : {}", stats.contributors);
     println!("  files        : {}", stats.files);
