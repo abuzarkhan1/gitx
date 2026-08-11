@@ -49,6 +49,17 @@ pub fn commit_line(c: &Commit, max_message: usize) -> String {
     )
 }
 
+/// Empty-state guidance rows (docs/08 §7): a message plus the documented
+/// recovery action.
+pub fn empty_rows(kind: &str) -> Vec<String> {
+    vec![
+        format!("No {kind} available."),
+        String::new(),
+        "Run:".into(),
+        "  gitx refresh".into(),
+    ]
+}
+
 /// Render a titled list with keyboard scrolling (docs/08: j/k scrolls, the
 /// selected row is highlighted). `rows` are the full content lines; `scroll`
 /// is the first visible row. Returns the number of rows so the caller can

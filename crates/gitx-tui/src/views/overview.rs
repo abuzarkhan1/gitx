@@ -1,3 +1,4 @@
+use crate::app::App;
 use ratatui::{
     Frame,
     layout::Rect,
@@ -5,15 +6,17 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
-pub fn render(f: &mut Frame, area: Rect, stats: Option<&gitx_analysis::RepoStats>) {
+/// Repository Overview (docs/08 §3): stats, state, activity chart, top
+/// hotspots, recent commits, and the health summary.
+pub fn render(f: &mut Frame, area: Rect, app: &App) -> usize {
     let block = Block::default()
         .title(" Repository Overview ")
         .borders(Borders::ALL)
         .style(Style::default().fg(Color::White));
 
-    let content = match stats {
+    let content = match &app.stats {
         None => "No repository loaded.\n\nRun gitx-tui from inside a Git repository.".to_string(),
-        Some(s) => format_stats(s),
+        Some(s) => format_stats(s, app),
     };
 
     let paragraph = Paragraph::new(content)
@@ -21,9 +24,10 @@ pub fn render(f: &mut Frame, area: Rect, stats: Option<&gitx_analysis::RepoStats
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(Color::White));
     f.render_widget(paragraph, area);
+    0
 }
 
-fn format_stats(s: &gitx_analysis::RepoStats) -> String {
+fn format_stats(s: &gitx_analysis::RepoStats, app: &App) -> String {
     let head = s
         .head_oid
         .as_ref()
@@ -36,9 +40,11 @@ fn format_stats(s: &gitx_analysis::RepoStats) -> String {
         .unwrap_or_else(|| "-".to_string());
     let first = s.first_commit.map(ts).unwrap_or_else(|| "-".to_string());
     let last = s.last_commit.map(ts).unwrap_or_else(|| "-".to_string());
+    let state = app.repo_state.as_deref().unwrap_or("clean").to_lowercase();
 
     let mut out = format!(
-        "HEAD      {}  {}\n\n\
+        "HEAD      {}  {}\n\
+         State     {}\n\n\
          Commits              {}\n\
          Contributors          {}\n\
          Files                 {}\n\
@@ -49,6 +55,7 @@ fn format_stats(s: &gitx_analysis::RepoStats) -> String {
          Last commit           {}\n",
         bold(&head),
         head_msg,
+        state,
         s.commits,
         s.contributors,
         s.files,
@@ -59,6 +66,58 @@ fn format_stats(s: &gitx_analysis::RepoStats) -> String {
         last,
     );
 
+    // Activity chart (docs/08 §3) — last 12 weeks, oldest → newest.
+    if let Some(activity) = &app.activity {
+        let max = activity.iter().map(|(_, c)| *c).max().unwrap_or(0).max(1);
+        let bars: String = activity
+            .iter()
+            .map(|(_, c)| {
+                let idx = (c * 8 / max).min(7);
+                "▁▂▃▄▅▆▇█".chars().nth(idx as usize).unwrap_or('▁')
+            })
+            .collect();
+        out.push_str(&format!("\nActivity (12 weeks)\n  {bars}\n"));
+    }
+
+    // Top hotspots (docs/08 §3).
+    if let Some(a) = &app.hotspots
+        && !a.files.is_empty()
+    {
+        out.push_str("\nTop hotspots (maintenance risk)\n");
+        for file in a.files.iter().take(5) {
+            out.push_str(&format!(
+                "  {:.0}  {:<4}  {}\n",
+                file.hotspot,
+                file.classification,
+                file.path.display()
+            ));
+        }
+    }
+
+    // Recent commits (docs/08 §3).
+    if let Some(timeline) = &app.timeline
+        && !timeline.is_empty()
+    {
+        out.push_str("\nRecent commits\n");
+        for c in timeline.iter().take(5) {
+            out.push_str(&format!(
+                "  {}  {}  {}\n",
+                &c.id.to_string()[..7.min(c.id.to_string().len())],
+                c.author.name,
+                one_line(&c.message)
+            ));
+        }
+    }
+
+    // Health summary (docs/08 §3).
+    if let Some(a) = &app.hotspots {
+        let h = &a.health;
+        out.push_str(&format!(
+            "\nHealth overall {:.0}/100  (see Health view for sub-scores)\n",
+            h.overall_score
+        ));
+    }
+
     if !s.languages.is_empty() {
         out.push_str("\nLanguages\n");
         for (ext, count) in s.languages.iter().take(8) {
@@ -66,8 +125,12 @@ fn format_stats(s: &gitx_analysis::RepoStats) -> String {
         }
     }
 
-    out.push_str("\nPress ? for help, q to quit.");
+    out.push_str("\nPress ? for help, r to refresh, q to quit.");
     out
+}
+
+fn one_line(message: &str) -> String {
+    message.lines().next().unwrap_or("").to_string()
 }
 
 fn ts(seconds: i64) -> String {
@@ -122,44 +185,6 @@ pub fn architecture_panel(
                 .title(" Architecture (modules) ")
                 .borders(Borders::ALL),
         )
-        .wrap(Wrap { trim: false })
-        .style(Style::default().fg(Color::White));
-    f.render_widget(paragraph, area);
-}
-
-/// Health panel (docs/08): the six deterministic sub-scores + overall.
-pub fn health_panel(f: &mut Frame, area: Rect, analysis: Option<&gitx_analysis::RepoAnalysis>) {
-    let content = match analysis {
-        None => "No repository loaded.".to_string(),
-        Some(a) => {
-            let h = &a.health;
-            format!(
-                "Repository Health  (composite, deterministic)\n\n\
-                 Code Hotspots           {:>5.0}/100\n\
-                 Ownership Risk          {:>5.0}/100\n\
-                 Branch Hygiene          {:>5.0}/100\n\
-                 Change Volatility       {:>5.0}/100\n\
-                 Architecture Stability  {:>5.0}/100\n\
-                 Recovery Risk           {:>5.0}/100\n\n\
-                 Overall                 {:>5.0}/100\n\n\
-                 Evidence: {} commits, {} contributors, {} files ({} analyzed) in {} ms",
-                h.code_hotspots_score,
-                h.ownership_risk_score,
-                h.branch_hygiene_score,
-                h.change_volatility_score,
-                h.architecture_stability_score,
-                h.recovery_risk_score,
-                h.overall_score,
-                a.total_commits,
-                a.total_contributors,
-                a.current_files,
-                a.files.len(),
-                a.analysis_duration_ms
-            )
-        }
-    };
-    let paragraph = Paragraph::new(content)
-        .block(Block::default().title(" Health ").borders(Borders::ALL))
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(Color::White));
     f.render_widget(paragraph, area);

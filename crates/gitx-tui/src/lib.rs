@@ -1,5 +1,6 @@
 pub mod app;
 pub mod events;
+pub mod index_backed;
 pub mod terminal;
 pub mod ui;
 pub mod views;
@@ -23,7 +24,11 @@ pub async fn run() -> Result<()> {
         if let Some(event) = events.next().await {
             match event {
                 Event::Key(key_event) => handle_key(&mut app, &mut search_mode, key_event),
-                Event::Tick => {}
+                // Background repository data may have landed (docs/08 loading
+                // progress): the UI stays responsive while it computes.
+                Event::Tick => {
+                    app.poll_load();
+                }
                 Event::Resize(_, _) => {}
             }
         }
@@ -58,7 +63,9 @@ fn handle_key(app: &mut App, search_mode: &mut bool, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => app.quit(),
         KeyCode::Esc => {
-            if app.error.is_some() {
+            if app.show_help {
+                app.show_help = false;
+            } else if app.error.is_some() {
                 app.error = None;
             } else if app.current_view == View::Detail {
                 // Close the detail back to its originating panel.
@@ -109,7 +116,7 @@ fn handle_key(app: &mut App, search_mode: &mut bool, key: KeyEvent) {
                 app.scroll = 0;
             }
         }
-        KeyCode::Char('r') => {}
+        KeyCode::Char('r') => app.reload(),
         KeyCode::Char('/') => {
             *search_mode = true;
             app.current_view = View::Search;
@@ -117,9 +124,7 @@ fn handle_key(app: &mut App, search_mode: &mut bool, key: KeyEvent) {
             app.search_query.clear();
             app.search_results = None;
         }
-        KeyCode::Char('?') => {
-            // Help is surfaced via the status bar; Esc returns to navigation.
-        }
+        KeyCode::Char('?') => app.show_help = !app.show_help,
         KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' => {
             app.quit();
         }

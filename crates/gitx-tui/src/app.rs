@@ -1,3 +1,5 @@
+use chrono::Datelike;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Overview,
@@ -66,6 +68,26 @@ pub struct App {
     pub detail_text: Option<Vec<String>>,
     /// Scroll offset within the detail view.
     pub detail_scroll: usize,
+    /// True while the keybinding help overlay is shown (docs/08: `?` help).
+    pub show_help: bool,
+    /// Weekly commit counts for the Overview activity chart (docs/08 §3),
+    /// oldest → newest (last 12 weeks).
+    pub activity: Option<Vec<(String, u32)>>,
+    /// Changed-file count per timeline commit, aligned with `timeline`
+    /// (docs/08 Timeline: changed-file count column).
+    pub timeline_file_counts: Option<Vec<u32>>,
+    /// Tip-commit timestamp per branch, aligned with `branches` (docs/08
+    /// Branch view: age + activity).
+    pub branch_tips: Option<Vec<i64>>,
+    /// Repository state string from gix (clean/merge/rebase...).
+    pub repo_state: Option<String>,
+    /// Per-sub-score evidence lines for the Health view (docs/08 §3: selecting
+    /// a sub-score reveals its evidence).
+    pub health_evidence: Vec<Vec<String>>,
+    /// Receiver for the background data load (docs/08 loading progress): the
+    /// repo data is computed on a worker thread so the UI renders immediately
+    /// and the status bar shows progress while it loads.
+    data_rx: Option<std::sync::mpsc::Receiver<AppData>>,
 }
 
 impl Default for App {
@@ -75,40 +97,95 @@ impl Default for App {
 }
 
 impl App {
+    /// Start with no data: the repository load runs on a worker thread and
+    /// lands via [`App::apply_data`] once ready (docs/08 loading progress).
     pub fn new() -> Self {
-        let (
-            stats,
-            timeline,
-            hotspots,
-            branches,
-            contributors,
-            dependencies,
-            recovery,
-            repo_path,
-            error,
-        ) = load_repo_stats();
+        Self::spawn_load()
+    }
+
+    fn spawn_load() -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let data = load_repo_stats();
+            let _ = tx.send(data);
+        });
         Self {
             current_view: View::Overview,
             nav_index: 0,
             running: true,
-            error,
-            loading: false,
-            stats,
-            timeline,
-            hotspots,
-            branches,
-            contributors,
-            dependencies,
-            recovery,
+            error: None,
+            loading: true,
+            stats: None,
+            timeline: None,
+            hotspots: None,
+            branches: None,
+            contributors: None,
+            dependencies: None,
+            recovery: None,
             search_query: String::new(),
             search_results: None,
-            repo_path,
+            repo_path: None,
             scroll: 0,
             in_content: false,
             selected: 0,
             detail: None,
             detail_text: None,
             detail_scroll: 0,
+            show_help: false,
+            activity: None,
+            timeline_file_counts: None,
+            branch_tips: None,
+            repo_state: None,
+            health_evidence: Vec::new(),
+            data_rx: Some(rx),
+        }
+    }
+
+    /// Apply the background-loaded repository data (docs/08 loading progress).
+    pub fn apply_data(&mut self, data: AppData) {
+        self.error = data.error;
+        self.stats = data.stats;
+        self.timeline = data.timeline;
+        self.hotspots = data.hotspots;
+        self.branches = data.branches;
+        self.contributors = data.contributors;
+        self.dependencies = data.dependencies;
+        self.recovery = data.recovery;
+        self.repo_path = data.repo_path;
+        self.activity = data.activity;
+        self.timeline_file_counts = data.timeline_file_counts;
+        self.branch_tips = data.branch_tips;
+        self.repo_state = data.repo_state;
+        self.health_evidence = data.health_evidence;
+        self.loading = false;
+        // Data changed: invalidate stale search results.
+        self.search_results = None;
+    }
+
+    /// Reload all repository data on a worker thread (docs/08: `r` refresh).
+    /// The status bar shows progress while the new data loads.
+    pub fn reload(&mut self) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let data = load_repo_stats();
+            let _ = tx.send(data);
+        });
+        self.data_rx = Some(rx);
+        self.loading = true;
+    }
+
+    /// Poll the background loader; returns true when new data landed.
+    pub fn poll_load(&mut self) -> bool {
+        let Some(rx) = &self.data_rx else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(data) => {
+                self.apply_data(data);
+                self.data_rx = None;
+                true
+            }
+            Err(_) => false,
         }
     }
 
@@ -294,41 +371,55 @@ impl App {
 
 /// All repository data loaded eagerly at startup, keyed by the panels that
 /// consume it (docs/08).
-type LoadedData = (
-    Option<gitx_analysis::RepoStats>,
-    Option<Vec<gitx_git::models::Commit>>,
-    Option<gitx_analysis::RepoAnalysis>,
-    Option<Vec<gitx_git::models::Branch>>,
-    Option<Vec<(String, u64)>>,
-    Option<Vec<(std::path::PathBuf, Vec<gitx_analysis::manifest::Dependency>)>>,
-    Option<gitx_analysis::RecoveryReport>,
-    Option<String>,
-    Option<String>,
-);
+pub struct AppData {
+    pub stats: Option<gitx_analysis::RepoStats>,
+    pub timeline: Option<Vec<gitx_git::models::Commit>>,
+    pub hotspots: Option<gitx_analysis::RepoAnalysis>,
+    pub branches: Option<Vec<gitx_git::models::Branch>>,
+    pub contributors: Option<Vec<(String, u64)>>,
+    pub dependencies: Option<Vec<(std::path::PathBuf, Vec<gitx_analysis::manifest::Dependency>)>>,
+    pub recovery: Option<gitx_analysis::RecoveryReport>,
+    pub repo_path: Option<String>,
+    pub error: Option<String>,
+    pub activity: Option<Vec<(String, u32)>>,
+    pub timeline_file_counts: Option<Vec<u32>>,
+    pub branch_tips: Option<Vec<i64>>,
+    pub repo_state: Option<String>,
+    pub health_evidence: Vec<Vec<String>>,
+}
 
 /// Load repository data eagerly at startup by discovering the repository from
 /// the current directory. Blocks briefly; acceptable for V1 (docs/08 notes the
 /// overview is the first-render anchor).
-fn load_repo_stats() -> LoadedData {
+fn load_repo_stats() -> AppData {
     let repo = match gitx_git::Repository::discover(".") {
         Ok(repo) => repo,
         Err(err) => {
-            return (
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Some(format!("not inside a Git repository: {err}")),
-            );
+            return AppData {
+                stats: None,
+                timeline: None,
+                hotspots: None,
+                branches: None,
+                contributors: None,
+                dependencies: None,
+                recovery: None,
+                repo_path: None,
+                error: Some(format!("not inside a Git repository: {err}")),
+                activity: None,
+                timeline_file_counts: None,
+                branch_tips: None,
+                repo_state: None,
+                health_evidence: Vec::new(),
+            };
         }
     };
     let path = repo.work_dir().map(|p| p.display().to_string());
+    let repo_state = repo.state();
 
-    let stats = gitx_analysis::repository_stats(&repo).ok();
+    // Index-backed fast path (docs/13 §3): with a fresh persisted index the
+    // overview statistics come from SQLite in milliseconds; otherwise fall
+    // back to live computation from Git.
+    let stats = index_stats_or_live(&repo);
     let service = gitx_history::timeline::HistoryService::new(&repo);
     let timeline = service
         .timeline(gitx_history::timeline::TimelineOptions {
@@ -336,7 +427,10 @@ fn load_repo_stats() -> LoadedData {
             ..Default::default()
         })
         .ok();
-    let hotspots = gitx_analysis::analyze_repository(&repo).ok();
+    // Index-backed analysis (docs/13 §3): when a fresh persisted analysis
+    // cache exists, the hotspot/health panels read it instead of recomputing
+    // from Git; otherwise fall back to live analysis.
+    let hotspots = index_analysis_or_live(&repo);
     let branches = repo.branches().ok();
 
     // Contributors from the timeline (author key → commit count).
@@ -351,12 +445,68 @@ fn load_repo_stats() -> LoadedData {
         list
     });
 
+    // Changed-file count per timeline commit (docs/08 Timeline column).
+    let timeline_file_counts = timeline.as_ref().map(|commits| {
+        commits
+            .iter()
+            .map(|c| {
+                let parent_tree = match c.parents.first() {
+                    Some(parent) => repo.find_commit(*parent).ok().map(|p| p.tree_id),
+                    None => None,
+                };
+                repo.diff_tree_to_tree(parent_tree, c.tree_id)
+                    .map(|changes| changes.len() as u32)
+                    .unwrap_or(0)
+            })
+            .collect()
+    });
+
+    // Weekly commit counts, last 12 weeks (docs/08 Overview activity chart).
+    let activity = timeline.as_ref().map(|commits| {
+        let now = chrono::Utc::now();
+        let mut buckets: Vec<(String, u32)> = (0..12)
+            .map(|i| {
+                let week = now - chrono::Duration::weeks(i);
+                (
+                    format!("{}-W{:02}", week.format("%G"), week.iso_week().week()),
+                    0,
+                )
+            })
+            .collect();
+        buckets.reverse();
+        for c in commits {
+            let Some(dt) = chrono::DateTime::from_timestamp(c.author.time, 0) else {
+                continue;
+            };
+            let label = format!("{}-W{:02}", dt.format("%G"), dt.iso_week().week());
+            if let Some(bucket) = buckets.iter_mut().find(|(l, _)| *l == label) {
+                bucket.1 += 1;
+            }
+        }
+        buckets
+    });
+
+    // Tip-commit timestamp per branch (docs/08 Branch view age + activity).
+    let branch_tips = branches.as_ref().map(|list| {
+        list.iter()
+            .map(|b| {
+                repo.find_commit(b.target)
+                    .map(|c| c.author.time)
+                    .unwrap_or(0)
+            })
+            .collect()
+    });
+
     let dependencies = gitx_analysis::manifest::head_dependencies(&repo).ok();
     // Cap the object-database scan so TUI startup stays fast on large repos
     // (the CLI `gitx recovery` does the full scan on demand).
     let recovery = gitx_analysis::recovery::analyze_recovery_capped(&repo).ok();
 
-    (
+    // Per-sub-score evidence for the Health view (docs/08 §3: never just a
+    // number). Index order matches the six sub-scores.
+    let health_evidence = build_health_evidence(hotspots.as_ref());
+
+    AppData {
         stats,
         timeline,
         hotspots,
@@ -364,9 +514,123 @@ fn load_repo_stats() -> LoadedData {
         contributors,
         dependencies,
         recovery,
-        path,
-        None,
-    )
+        repo_path: path,
+        error: None,
+        activity,
+        timeline_file_counts,
+        branch_tips,
+        repo_state,
+        health_evidence,
+    }
+}
+
+/// Hotspot/health analysis: prefer a fresh persisted analysis cache, fall
+/// back to live computation (docs/13 §3).
+fn index_analysis_or_live(repo: &gitx_git::Repository) -> Option<gitx_analysis::RepoAnalysis> {
+    let path = crate::index_backed::default_index_path(repo);
+    if let Ok(conn) = rusqlite::Connection::open(&path) {
+        if gitx_storage::migrations::ensure_schema_compatible(&conn).is_ok()
+            && gitx_analysis::cache::is_fresh(&conn, repo)
+            && let Ok(Some(a)) = gitx_analysis::cache::load(&conn)
+        {
+            return Some(a);
+        }
+    }
+    gitx_analysis::analyze_repository(repo).ok()
+}
+
+/// Statistics for the Overview panel: prefer a fresh persisted index, fall
+/// back to live Git analysis (docs/13 §3 sub-second startup).
+fn index_stats_or_live(repo: &gitx_git::Repository) -> Option<gitx_analysis::RepoStats> {
+    if let Some(s) = crate::index_backed::stats_from_index(repo).ok().flatten() {
+        return Some(gitx_analysis::RepoStats {
+            commits: s.commits,
+            contributors: s.contributors as usize,
+            files: s.files as usize,
+            branches: s.branches as usize,
+            tags: s.tags as usize,
+            age_days: s.age_days as i64,
+            first_commit: s.first_commit,
+            last_commit: s.latest_commit,
+            head_oid: repo.head_commit_id().ok().map(|id| id.to_string()),
+            head_message: repo
+                .head_commit_id()
+                .ok()
+                .and_then(|id| repo.find_commit(id).ok())
+                .map(|c| c.message),
+            languages: s
+                .languages
+                .into_iter()
+                .map(|(ext, count)| (ext, count as usize))
+                .collect(),
+        });
+    }
+    gitx_analysis::repository_stats(repo).ok()
+}
+
+/// Evidence lines for each of the six health sub-scores, derived from the
+/// analysis (docs/10 §8 explainability). Empty when analysis is unavailable.
+fn build_health_evidence(analysis: Option<&gitx_analysis::RepoAnalysis>) -> Vec<Vec<String>> {
+    let Some(a) = analysis else { return Vec::new() };
+    let total = a.files.len().max(1);
+
+    let high_risk: Vec<&gitx_analysis::pipeline::FileAnalysis> = a
+        .files
+        .iter()
+        .filter(|f| f.classification == "HIGH" || f.classification == "CRITICAL")
+        .collect();
+    let mut hotspots = Vec::new();
+    hotspots.push(format!(
+        "{} of {} files are HIGH/CRITICAL hotspots",
+        high_risk.len(),
+        total
+    ));
+    for f in high_risk.iter().take(5) {
+        hotspots.push(format!("  {} (score {:.0})", f.path.display(), f.hotspot));
+    }
+
+    let mut ownership = Vec::new();
+    let mut owned: Vec<&gitx_analysis::pipeline::FileAnalysis> = a.files.iter().collect();
+    owned.sort_by(|x, y| {
+        y.ownership_concentration
+            .partial_cmp(&x.ownership_concentration)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for f in owned.iter().take(5) {
+        ownership.push(format!(
+            "  {:.0}% concentrated  {}",
+            f.ownership_concentration,
+            f.path.display()
+        ));
+    }
+
+    let mut volatility = Vec::new();
+    let mut churny: Vec<&gitx_analysis::pipeline::FileAnalysis> = a.files.iter().collect();
+    // FileMetrics has no dedicated churn field; use total lines touched as the
+    // volatility proxy (docs/10 §2 churn = insertions + deletions).
+    let churn_of = |f: &gitx_analysis::pipeline::FileAnalysis| {
+        f.metrics.lines_added as u64 + f.metrics.lines_deleted as u64
+    };
+    churny.sort_by_key(|f| std::cmp::Reverse(churn_of(f)));
+    for f in churny.iter().take(5) {
+        volatility.push(format!(
+            "  {} lines touched  {}",
+            churn_of(f),
+            f.path.display()
+        ));
+    }
+
+    vec![
+        hotspots,
+        ownership,
+        vec!["Branch hygiene: share of branches with activity in the last 30 days.".to_string()],
+        volatility,
+        vec![
+            "Architecture stability: share of current files not added in the last 30 days."
+                .to_string(),
+        ],
+        vec!["Recovery risk: reflog presence and unreachable-commit volume.".to_string()],
+    ]
 }
 
 /// Render a commit's full detail: metadata, message, and changed files with

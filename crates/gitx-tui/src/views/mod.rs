@@ -5,6 +5,7 @@ pub mod contributors;
 pub mod dependencies;
 pub mod detail;
 pub mod files;
+pub mod health;
 pub mod hotspots;
 pub mod overview;
 pub mod ownership;

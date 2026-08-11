@@ -14,9 +14,12 @@ tokio = { version = "1.0", features = ["full"] }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 gitx-core = { path = "../gitx-core" }
 gitx-git = { path = "../gitx-git" }
 gitx-history = { path = "../gitx-history" }
 gitx-analysis = { path = "../gitx-analysis" }
+gitx-storage = { path = "../gitx-storage" }
+rusqlite = { workspace = true }
 chrono = { version = "0.4.34" }
 futures = "0.3.33"
