@@ -24,3 +24,27 @@ path = "integration/analysis_recovery.rs"
 [[test]]
 name = "indexer"
 path = "integration/indexer.rs"
+
+[[test]]
+name = "lineage"
+path = "integration/lineage.rs"
+
+[[test]]
+name = "pipeline"
+path = "integration/pipeline.rs"
+
+[[test]]
+name = "cli_snapshots"
+path = "integration/cli_snapshots.rs"
+
+[[test]]
+name = "failures"
+path = "integration/failures.rs"
+
+[[test]]
+name = "properties"
+path = "integration/properties.rs"
+
+[[test]]
+name = "edge_cases"
+path = "integration/edge_cases.rs"

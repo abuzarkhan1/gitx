@@ -74,6 +74,9 @@ impl Drop for FixtureRepo {
 }
 
 /// Standard small repository used by most integration tests.
+/// Not every test target uses it; allow dead code when included by one that
+/// doesn't.
+#[allow(dead_code)]
 pub fn sample_repo() -> Option<FixtureRepo> {
     let repo = FixtureRepo::new("sample")?;
     repo.write("src/lib.rs", "pub fn hello() {}\n");
