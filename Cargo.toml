@@ -9,6 +9,7 @@ members = [
     "crates/gitx-analysis",
     "crates/gitx-graph",
     "crates/gitx-search",
+    "crates/gitx-services",
     "crates/gitx-tui",
     "tests"
 ]

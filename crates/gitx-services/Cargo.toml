@@ -1,0 +1,18 @@
+[package]
+name = "gitx-services"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gitx-core = { path = "../gitx-core" }
+gitx-git = { path = "../gitx-git" }
+gitx-history = { path = "../gitx-history" }
+gitx-analysis = { path = "../gitx-analysis" }
+gitx-index = { path = "../gitx-index" }
+gitx-search = { path = "../gitx-search" }
+gitx-storage = { path = "../gitx-storage" }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+chrono = { version = "0.4.34" }
