@@ -1,14 +1,23 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod filter;
+pub mod orchestrator;
+pub mod query;
+pub mod ranking;
+pub mod result;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use filter::*;
+pub use orchestrator::*;
+pub use query::*;
+pub use ranking::*;
+pub use result::*;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum SearchError {
+    #[error("Database error: {0}")]
+    Database(String),
+    #[error("Query parse error: {0}")]
+    QueryParse(String),
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
+pub mod sqlite;
+pub use sqlite::*;
