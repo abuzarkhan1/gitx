@@ -63,7 +63,11 @@ impl<'a> RepositoryStore<'a> {
                 "INSERT INTO commit_parents (commit_oid, parent_oid, parent_index) VALUES (?1, ?2, ?3)"
             )?;
             for parent in parents {
-                stmt.execute(params![parent.commit_oid, parent.parent_oid, parent.parent_index])?;
+                stmt.execute(params![
+                    parent.commit_oid,
+                    parent.parent_oid,
+                    parent.parent_index
+                ])?;
             }
         }
         tx.commit()?;
@@ -134,14 +138,10 @@ impl<'a> RepositoryStore<'a> {
     pub fn insert_tags_batch(&mut self, tags: &[Tag]) -> Result<()> {
         let tx = self.conn.transaction()?;
         {
-            let mut stmt = tx.prepare_cached(
-                "INSERT INTO tags (name, target_oid) VALUES (?1, ?2)"
-            )?;
+            let mut stmt =
+                tx.prepare_cached("INSERT INTO tags (name, target_oid) VALUES (?1, ?2)")?;
             for tag in tags {
-                stmt.execute(params![
-                    tag.name,
-                    tag.target_oid
-                ])?;
+                stmt.execute(params![tag.name, tag.target_oid])?;
             }
         }
         tx.commit()?;

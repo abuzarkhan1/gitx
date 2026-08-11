@@ -3,7 +3,24 @@ name = "gitx-cli"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "gitx"
+path = "src/main.rs"
+
 [dependencies]
+gitx-core = { path = "../gitx-core" }
+gitx-git = { path = "../gitx-git" }
+gitx-history = { path = "../gitx-history" }
+gitx-analysis = { path = "../gitx-analysis" }
+gitx-graph = { path = "../gitx-graph" }
+gitx-index = { path = "../gitx-index" }
+gitx-search = { path = "../gitx-search" }
+gitx-storage = { path = "../gitx-storage" }
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros"] }
+clap_complete = "4.5"
+serde.workspace = true
+serde_json.workspace = true
+rusqlite = { workspace = true }
+chrono = { version = "0.4.34" }
+toml = "0.8"

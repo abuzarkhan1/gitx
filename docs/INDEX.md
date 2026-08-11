@@ -25,4 +25,8 @@
 - [23-FEATURE-MATRIX](23-FEATURE-MATRIX.md)
 - [24-DATA-FLOW-AND-ALGORITHMS](24-DATA-FLOW-AND-ALGORITHMS.md)
 - [25-UX-AND-OUTPUT-GUIDELINES](25-UX-AND-OUTPUT-GUIDELINES.md)
+- [26-IMPLEMENTATION-STATUS](26-IMPLEMENTATION-STATUS.md) — docs ⇄ code audit matrix
+- [27-RELEASING](27-RELEASING.md) — release process guide
 - [README](README.md)
+
+Also see the release workflows in `.github/workflows/` and `CHANGELOG.md`.

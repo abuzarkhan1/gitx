@@ -9,7 +9,8 @@ members = [
     "crates/gitx-analysis",
     "crates/gitx-graph",
     "crates/gitx-search",
-    "crates/gitx-tui"
+    "crates/gitx-tui",
+    "tests"
 ]
 resolver = "2"
 
@@ -34,3 +35,26 @@ petgraph = "0.6"
 rayon = "1.10"
 ignore = "0.4"
 criterion = "0.5"
+
+# cargo-dist release packaging (docs/18-RELEASE-ENGINEERING.md). Generated
+# configuration; `cargo dist plan` shows what will be produced.
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI.
+cargo-dist-version = "0.24.0"
+# Installers and CI tools for these platforms: macOS, Linux, Windows.
+# `aarch64-apple-darwin` and `x86_64-apple-darwin` for macOS,
+# `x86_64-unknown-linux-gnu` for Linux, `x86_64-pc-windows-msvc` for Windows.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+# The single binary that users install.
+# Both the CLI and TUI are shipped; the CLI is the primary entrypoint.
+command = ["gitx", "gitx-tui"]
+# Publish installers and artifacts on tagged releases.
+pr-run-mode = "upload"
+# Never run the installer build on every PR (only tagged releases).
+installers = ["shell", "powershell", "homebrew"]
+# Checksums are generated automatically by cargo-dist for every artifact.

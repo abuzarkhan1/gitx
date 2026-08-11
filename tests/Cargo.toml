@@ -1,0 +1,26 @@
+[package]
+name = "gitx-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+gitx-git = { path = "../crates/gitx-git" }
+gitx-history = { path = "../crates/gitx-history" }
+gitx-analysis = { path = "../crates/gitx-analysis" }
+gitx-index = { path = "../crates/gitx-index" }
+gitx-storage = { path = "../crates/gitx-storage" }
+rusqlite = { workspace = true }
+anyhow = { workspace = true }
+
+[[test]]
+name = "history_blame"
+path = "integration/history_blame.rs"
+
+[[test]]
+name = "analysis_recovery"
+path = "integration/analysis_recovery.rs"
+
+[[test]]
+name = "indexer"
+path = "integration/indexer.rs"

@@ -6,7 +6,6 @@ use std::collections::HashSet;
 
 const BATCH_SIZE: usize = 1000;
 
-
 pub struct Indexer<'a> {
     git: &'a dyn GitProvider,
     storage: &'a dyn StorageProvider,
@@ -65,7 +64,7 @@ impl<'a> Indexer<'a> {
             if visited.contains(&commit.id) {
                 continue;
             }
-            if self.storage.is_commit_indexed(&commit.id)? {
+            if tx.is_commit_indexed(&commit.id)? {
                 continue; // Stop going deeper on this branch if already indexed
             }
 

@@ -14,6 +14,11 @@ impl ObjectId {
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
+
+    /// Parse a 40-character hex SHA-1 object id.
+    pub fn from_hex(hex: &str) -> Option<Self> {
+        gix::ObjectId::from_hex(hex.as_bytes()).ok().map(ObjectId)
+    }
 }
 
 /// A representation of a Git Commit

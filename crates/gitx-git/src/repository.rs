@@ -144,11 +144,140 @@ impl Repository {
         }
         Ok(tags)
     }
-}
 
+    pub fn rev_walk<'a>(
+        &'a self,
+        head: ObjectId,
+    ) -> Result<impl Iterator<Item = Result<ObjectId>> + 'a> {
+        let rev_walk = self.repo.rev_walk([head.0]);
+        let iter = rev_walk
+            .all()
+            .map_err(|e| GitError::Other(anyhow::anyhow!(e)))?;
+        Ok(iter.map(|info_res| {
+            info_res
+                .map(|info| ObjectId(info.id))
+                .map_err(|e| GitError::Other(anyhow::anyhow!(e)))
+        }))
+    }
+}
 
 impl Repository {
     pub fn state(&self) -> Option<String> {
         self.repo.state().map(|s| format!("{:?}", s))
+    }
+
+    /// Recursively list every blob path (file) reachable from `tree_id`.
+    /// Submodules are skipped.
+    pub fn list_blobs(&self, tree_id: ObjectId) -> Result<Vec<std::path::PathBuf>> {
+        let mut out = Vec::new();
+        collect_paths(&self.repo, tree_id, std::path::PathBuf::new(), &mut out)?;
+        Ok(out)
+    }
+
+    /// Recursively list every blob path and its object id reachable from
+    /// `tree_id` (used by architecture diffing). Submodules are skipped.
+    pub fn tree_entries(&self, tree_id: ObjectId) -> Result<Vec<(std::path::PathBuf, ObjectId)>> {
+        let mut out = Vec::new();
+        collect_entries(&self.repo, tree_id, std::path::PathBuf::new(), &mut out)?;
+        Ok(out)
+    }
+}
+
+fn collect_entries(
+    repo: &gix::Repository,
+    tree_id: ObjectId,
+    prefix: std::path::PathBuf,
+    out: &mut Vec<(std::path::PathBuf, ObjectId)>,
+) -> Result<()> {
+    let tree = repo
+        .find_object(tree_id.0)
+        .map_err(|e| GitError::ObjectReadError(tree_id.to_string(), e.to_string()))?
+        .into_tree();
+    let decoded = tree
+        .decode()
+        .map_err(|e| GitError::TreeError(e.to_string()))?;
+
+    for entry in decoded.entries {
+        let name = std::str::from_utf8(entry.filename).unwrap_or("<invalid>");
+        let path = prefix.join(name);
+        let oid = ObjectId(entry.oid.to_owned());
+        if entry.mode.is_tree() {
+            collect_entries(repo, oid, path, out)?;
+        } else if entry.mode.is_commit() {
+            continue; // submodule
+        } else {
+            out.push((path, oid));
+        }
+    }
+    Ok(())
+}
+
+fn collect_paths(
+    repo: &gix::Repository,
+    tree_id: ObjectId,
+    prefix: std::path::PathBuf,
+    out: &mut Vec<std::path::PathBuf>,
+) -> Result<()> {
+    let tree = repo
+        .find_object(tree_id.0)
+        .map_err(|e| GitError::ObjectReadError(tree_id.to_string(), e.to_string()))?
+        .into_tree();
+    let decoded = tree
+        .decode()
+        .map_err(|e| GitError::TreeError(e.to_string()))?;
+
+    for entry in decoded.entries {
+        let name = std::str::from_utf8(entry.filename).unwrap_or("<invalid>");
+        let path = prefix.join(name);
+        if entry.mode.is_tree() {
+            collect_paths(repo, ObjectId(entry.oid.to_owned()), path, out)?;
+        } else if entry.mode.is_commit() {
+            continue; // submodule
+        } else {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// The kind of a Git object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectKind {
+    Commit,
+    Tree,
+    Blob,
+    Tag,
+}
+
+impl Repository {
+    /// The kind of object `id` refers to, or `None` if it does not exist.
+    pub fn object_kind(&self, id: ObjectId) -> Result<Option<ObjectKind>> {
+        let object = match self.repo.find_object(id.0) {
+            Ok(o) => o,
+            Err(gix::object::find::existing::Error::NotFound { .. }) => return Ok(None),
+            Err(e) => return Err(GitError::ObjectReadError(id.to_string(), e.to_string())),
+        };
+        Ok(Some(match object.kind {
+            gix::objs::Kind::Commit => ObjectKind::Commit,
+            gix::objs::Kind::Tree => ObjectKind::Tree,
+            gix::objs::Kind::Blob => ObjectKind::Blob,
+            gix::objs::Kind::Tag => ObjectKind::Tag,
+        }))
+    }
+
+    /// Iterate over every object id in the object database (packs and loose).
+    /// Used by recovery analysis to find commits not reachable from any ref.
+    pub fn all_object_ids(
+        &self,
+    ) -> crate::Result<Box<dyn Iterator<Item = crate::Result<ObjectId>> + '_>> {
+        let iter = self
+            .repo
+            .objects
+            .iter()
+            .map_err(|e| GitError::Other(anyhow::anyhow!(e)))?;
+        Ok(Box::new(iter.map(|res| {
+            res.map(ObjectId)
+                .map_err(|e| GitError::Other(anyhow::anyhow!(e)))
+        })))
     }
 }

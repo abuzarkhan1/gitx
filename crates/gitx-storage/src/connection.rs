@@ -1,6 +1,6 @@
+use crate::error::Result;
 use rusqlite::Connection as RusqliteConnection;
 use std::path::Path;
-use crate::error::Result;
 
 pub struct Connection {
     pub(crate) inner: RusqliteConnection,
