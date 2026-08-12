@@ -744,6 +744,43 @@ symbols, milestones, dependency depth) or the seventh pass below.
     recorded baseline (`benches/RESULTS.md`, `scripts/bench.sh`) measure
     the sub-second-startup budget on a per-release basis.
 
+## Eighth implementation pass (product hardening, all verified)
+
+Executed `docs/superpowers/plans/2026-08-13-product-hardening.md` — the
+ship-readiness milestone; **45/45 PTY checks**, 39 test binaries green,
+clippy `-D warnings` clean, `cargo fmt` clean.
+
+- **`gitx` opens the dashboard (docs/07 §1, docs/16 §7, docs/01 UC-01)** —
+  no-arg `gitx` (and the explicit `gitx tui` subcommand) launches the TUI
+  in-process on a terminal; on a pipe/CI it prints a compact repository
+  snapshot. `[ui] vim_keys` is threaded through the TUI key handler.
+- **`[index] auto_refresh` honored (docs/16 §3, docs/09)** — the first
+  index-backed command builds a stale/absent index via
+  `IndexService::refresh_if_stale()`, so analysis/stats read from SQLite
+  (sub-second) instead of recomputing live from Git. The TUI loader
+  auto-refreshes too. `index.enabled=false`, `auto_refresh=false`, and
+  `--no-cache` are all respected.
+- **Incremental indexer data fix** — the scan/refresh path used to write
+  commits with NULL `author_id`/`committer_id`/`tree_oid` and files with
+  language `'none'`, degrading stats, search joins, and the TUI language
+  breakdown from every index-built artifact. The provider now resolves
+  author/committer rows like `build_index`, the walk carries the tree oid,
+  and the analysis cache derives real languages (healing `'none'` rows);
+  the TUI Contributors view falls back to persisted `file_ownership`.
+- **Health bands (docs/10 §8)** — health output uses health semantics
+  (`0–30 POOR · 31–60 FAIR · 61–80 GOOD · 81–100 EXCELLENT`, higher =
+  healthier) via a shared `gitx_analysis::health_band()`, never the risk
+  `CRITICAL` labels.
+- **Dead config wired (docs/16 §3)** — `default_limit` caps the top-N
+  commands (hotspots, risk); `index.enabled=false` makes `scan`/`refresh`
+  no-ops and forces live analysis; `search.case_sensitive` threads through
+  code search and post-filters FTS hits in the CLI, SearchService, and TUI.
+- **Release readiness (docs/18, docs/27)** — all 11 crates carry publish
+  metadata and versioned workspace-internal deps; the 0.1.0 changelog and
+  a concrete release runbook are in place. README is now a storefront
+  (badges, install paths, command tour, dashboard screenshot via
+  `scripts/ansi-to-png.py`).
+
 ## Deliberate non-goals preserved
 
 No AI, no network, no accounts: everything added is deterministic repository
