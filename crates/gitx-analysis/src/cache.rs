@@ -98,11 +98,21 @@ pub fn store(
     for f in &analysis.files {
         let path_str = f.path.display().to_string();
         let is_current = current.contains(&path_str);
+        // Language from the path extension, mirroring `build_index` (docs/06
+        // files.language): the Overview's language breakdown reads this
+        // column, so a cache-built index must carry real languages.
+        let language = f
+            .path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_else(|| "none".into());
         let file_id = match file_ids.get(&path_str) {
             Some(id) => {
+                // Also heal rows inserted by older builds with the 'none'
+                // placeholder language.
                 tx.execute(
-                    "UPDATE files SET is_current = ?1 WHERE id = ?2",
-                    rusqlite::params![is_current, id],
+                    "UPDATE files SET is_current = ?1, language = ?2 WHERE id = ?3",
+                    rusqlite::params![is_current, language, id],
                 )?;
                 *id
             }
@@ -111,8 +121,8 @@ pub fn store(
             None => {
                 tx.execute(
                     "INSERT INTO files (path, first_commit_oid, last_commit_oid, language, is_current) \
-                     VALUES (?1, NULL, NULL, 'none', ?2) ON CONFLICT(path) DO NOTHING",
-                    rusqlite::params![path_str, is_current],
+                     VALUES (?1, NULL, NULL, ?2, ?3) ON CONFLICT(path) DO NOTHING",
+                    rusqlite::params![path_str, language, is_current],
                 )?;
                 let id: i64 = tx.query_row(
                     "SELECT id FROM files WHERE path = ?1",

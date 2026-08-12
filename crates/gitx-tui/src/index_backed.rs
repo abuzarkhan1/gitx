@@ -86,3 +86,45 @@ pub fn stats_from_index(repo: &gitx_git::Repository) -> anyhow::Result<Option<In
         languages,
     }))
 }
+
+/// Author → files map for the Contributors view, read from the persisted
+/// `file_ownership` table (top-3 owners per file, docs/06). The cached
+/// `RepoAnalysis` deliberately does not carry `author_lines`, so the live
+/// enrichment path is empty from a fresh index; this mirrors the same query
+/// the live path computes (docs/08 Contributors: files touched + top areas).
+/// Returns `None` when the index is missing or has no ownership rows (callers
+/// fall back to the live analysis map).
+pub fn author_files_from_index(
+    repo: &gitx_git::Repository,
+) -> anyhow::Result<Option<std::collections::HashMap<String, Vec<String>>>> {
+    let path = default_index_path(repo);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let conn = rusqlite::Connection::open(&path)?;
+    if gitx_storage::migrations::ensure_schema_compatible(&conn).is_err() {
+        return Ok(None);
+    }
+    let mut map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut stmt = conn.prepare(
+        "SELECT a.name, a.email, f.path FROM file_ownership o \
+         JOIN authors a ON a.id = o.author_id \
+         JOIN files f ON f.id = o.file_id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (name, email, path) = row?;
+        let key = format!("{name} <{email}>");
+        map.entry(key).or_default().push(path);
+    }
+    if map.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(map))
+}

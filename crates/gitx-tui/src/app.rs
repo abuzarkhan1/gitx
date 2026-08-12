@@ -726,6 +726,24 @@ fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::at
     let path = repo.work_dir().map(|p| p.display().to_string());
     let repo_state = repo.state();
 
+    // First-run auto-refresh (docs/16 `[index] auto_refresh`): build a
+    // stale/absent index so every panel reads from SQLite instead of
+    // recomputing live from Git (docs/13 §3). Honored only when the
+    // effective config allows it; failures are non-fatal (live fallback).
+    {
+        let config_path = gitx_core::config::Config::default_path();
+        let config = config_path
+            .as_deref()
+            .map(gitx_core::config::Config::load)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        if config.index.enabled && config.index.auto_refresh {
+            let _ = gitx_services::IndexService::new(&repo).refresh_if_stale();
+        }
+    }
+
     // ======================================================================
     // Phase A — Overview essentials (docs/13 §7 lazy loading): stats,
     // timeline, per-commit areas and activity land first so the Overview
@@ -864,17 +882,33 @@ fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::at
     // the raw author name; empty from the cache).
     // Author identity → files they added lines to (keyed like the pipeline's
     // author_lines: `Name <email>`). Used for files_touched + top areas.
-    let author_files = hotspots.as_ref().map(|a| {
-        let mut map: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
-        for file in &a.files {
-            for author in file.author_lines.keys() {
-                map.entry(author.clone())
-                    .or_default()
-                    .push(file.path.display().to_string());
-            }
+    // From live analysis the per-file author_lines carry the full map; from a
+    // fresh index the cached RepoAnalysis has empty author_lines, so fall
+    // back to the persisted file_ownership table (top-3 owners per file,
+    // docs/06) so Contributors renders from the cache too (docs/08 §3).
+    let author_files = hotspots.as_ref().and_then(|a| {
+        if a.files.iter().any(|f| !f.author_lines.is_empty()) {
+            Some(
+                a.files
+                    .iter()
+                    .flat_map(|f| {
+                        f.author_lines
+                            .keys()
+                            .map(move |author| (author.clone(), f.path.display().to_string()))
+                    })
+                    .fold(
+                        std::collections::HashMap::<String, Vec<String>>::new(),
+                        |mut map, (author, path)| {
+                            map.entry(author).or_default().push(path);
+                            map
+                        },
+                    ),
+            )
+        } else {
+            crate::index_backed::author_files_from_index(&repo)
+                .ok()
+                .flatten()
         }
-        map
     });
     let contributors = timeline.as_ref().map(|commits| {
         let mut counts: std::collections::HashMap<String, Contributor> =

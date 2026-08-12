@@ -104,6 +104,34 @@ struct SqliteTransaction<'a> {
     active: bool,
 }
 
+impl SqliteTransaction<'_> {
+    /// Resolve (or insert) an author row by name+email, returning its id
+    /// (docs/06 authors table). Mirrors `build_index`'s author handling.
+    fn author_id(&mut self, name: &str, email: &str) -> Result<i64, IndexerError> {
+        let existing: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM authors WHERE name = ?1 AND email = ?2",
+                rusqlite::params![name, email],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| IndexerError::StorageError(e.to_string()))?;
+        match existing {
+            Some(id) => Ok(id),
+            None => {
+                self.conn
+                    .execute(
+                        "INSERT INTO authors (name, email) VALUES (?1, ?2)",
+                        rusqlite::params![name, email],
+                    )
+                    .map_err(|e| IndexerError::StorageError(e.to_string()))?;
+                Ok(self.conn.last_insert_rowid())
+            }
+        }
+    }
+}
+
 impl Drop for SqliteTransaction<'_> {
     fn drop(&mut self) {
         if self.active {
@@ -114,11 +142,34 @@ impl Drop for SqliteTransaction<'_> {
 
 impl Transaction for SqliteTransaction<'_> {
     fn write_commit(&mut self, commit: &Commit) -> Result<(), IndexerError> {
+        // Resolve (or insert) author + committer rows so the index's
+        // commits.author_id/committer_id are populated exactly like the full
+        // `build_index` path (docs/06): search joins, contributor stats, and
+        // the FTS author triggers all read them. Missing identity falls back
+        // to a deterministic "unknown" row rather than a NULL FK.
+        let author_id = self.author_id(
+            commit.author_name.as_deref().unwrap_or("unknown"),
+            commit.author_email.as_deref().unwrap_or(""),
+        )?;
+        let committer_id = self.author_id(
+            commit.committer_name.as_deref().unwrap_or("unknown"),
+            commit.committer_email.as_deref().unwrap_or(""),
+        )?;
         self.conn
             .execute(
-                "INSERT OR IGNORE INTO commits (oid, tree_oid, timestamp, message) VALUES (?1, NULL, ?2, ?3)",
+                "INSERT INTO commits (oid, tree_oid, author_id, committer_id, timestamp, message) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+                 ON CONFLICT(oid) DO UPDATE SET \
+                   tree_oid = excluded.tree_oid, \
+                   author_id = excluded.author_id, \
+                   committer_id = excluded.committer_id, \
+                   timestamp = excluded.timestamp, \
+                   message = excluded.message",
                 rusqlite::params![
                     commit.id.0,
+                    commit.tree_id.as_deref().unwrap_or(""),
+                    author_id,
+                    committer_id,
                     commit.timestamp.unwrap_or(0),
                     commit.message.as_deref().unwrap_or("")
                 ],

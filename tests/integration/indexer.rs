@@ -81,3 +81,84 @@ fn refresh_stops_at_indexed_boundaries() {
     indexer.refresh(&mut progress).expect("refresh after wipe");
     assert_eq!(commit_count(&conn), 3);
 }
+
+#[test]
+fn scan_populates_authors_tree_and_languages() {
+    // Regression (product-hardening audit): the incremental Indexer used to
+    // write commits with NULL author_id/committer_id/tree_oid and the analysis
+    // cache inserted files with language 'none', so stats/search/TUI showed
+    // "contributors 0" and an empty language breakdown from a fresh index.
+    let Some(repo) = sample_repo() else {
+        eprintln!("skipping: git CLI unavailable");
+        return;
+    };
+    let gix = Repository::discover(repo.path()).expect("open fixture");
+
+    let conn = open_indexed(std::path::Path::new(":memory:")).expect("in-memory index");
+    let storage = SqliteStorageProvider::new(&conn);
+    let indexer = Indexer::new(&gix, &storage);
+    let mut progress = NoopProgress;
+    indexer.scan(&mut progress).expect("scan");
+
+    let (authors, tree): (i64, i64) = conn
+        .borrow()
+        .query_row(
+            "SELECT count(DISTINCT author_id), count(*) FROM commits \
+             WHERE author_id IS NOT NULL AND tree_oid IS NOT NULL AND tree_oid != ''",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("author/tree stats");
+    assert_eq!(authors, 1, "fixture has one author; author_id must be set");
+    assert_eq!(
+        tree, 3,
+        "every commit must carry its tree oid (got {tree}/3)"
+    );
+
+    // Author rows themselves must be real identities, not a NULL-adjacent
+    // placeholder.
+    let name: String = conn
+        .borrow()
+        .query_row("SELECT name FROM authors LIMIT 1", [], |row| row.get(0))
+        .expect("author name");
+    assert_eq!(name, "IT Tester");
+}
+
+#[test]
+fn analysis_cache_writes_real_languages() {
+    // The language column backing the Overview breakdown must hold real
+    // extensions after the index + analysis cache are populated together.
+    let Some(repo) = sample_repo() else {
+        eprintln!("skipping: git CLI unavailable");
+        return;
+    };
+    let gix = Repository::discover(repo.path()).expect("open fixture");
+
+    let conn = open_indexed(std::path::Path::new(":memory:")).expect("in-memory index");
+    let storage = SqliteStorageProvider::new(&conn);
+    let indexer = Indexer::new(&gix, &storage);
+    let mut progress = NoopProgress;
+    indexer.scan(&mut progress).expect("scan");
+
+    let analysis = gitx_analysis::analyze_repository(&gix).expect("analyze fixture");
+    let mut conn = conn.borrow_mut();
+    let head = gix.head_commit_id().expect("head");
+    gitx_analysis::cache::store(&mut conn, &gix, &analysis, &head.to_string())
+        .expect("store cache");
+
+    let languages: Vec<(String, i64)> = conn
+        .prepare("SELECT language, count(*) FROM files WHERE is_current = 1 GROUP BY language")
+        .expect("prepare")
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("collect");
+    assert!(
+        languages.iter().any(|(lang, _)| lang == "rs"),
+        "sample_repo has src/lib.rs and main.rs; languages must include 'rs', got {languages:?}"
+    );
+    assert!(
+        languages.iter().all(|(lang, _)| lang != "none"),
+        "no file may carry the 'none' placeholder, got {languages:?}"
+    );
+}

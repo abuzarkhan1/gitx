@@ -71,6 +71,11 @@ impl GitProvider for Repository {
                             .unwrap_or_default(),
                         message: commit.as_ref().map(|c| c.message.clone()),
                         timestamp: commit.as_ref().map(|c| c.author.time),
+                        author_name: commit.as_ref().map(|c| c.author.name.clone()),
+                        author_email: commit.as_ref().map(|c| c.author.email.clone()),
+                        committer_name: commit.as_ref().map(|c| c.committer.name.clone()),
+                        committer_email: commit.as_ref().map(|c| c.committer.email.clone()),
+                        tree_id: commit.as_ref().map(|c| c.tree_id.to_string()),
                     }
                 })
                 .map_err(|e| gitx_index::IndexerError::GitError(e.to_string()))
