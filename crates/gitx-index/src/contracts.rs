@@ -9,18 +9,34 @@ pub trait GitProvider {
     /// HEAD lineage for rewritten-history detection (docs/09 §5).
     fn head_ref_name(&self) -> Result<Option<String>, IndexerError>;
 
-    // Returns an iterator of commits in topological order (newest to oldest, or parent-first depending on traversal)
-    // To handle large history, it returns an iterator.
-    fn walk_commits(
-        &self,
+    // Returns an iterator of commits the index needs (newest to oldest),
+    // stopping at commits already present in `indexed` — their ancestry is by
+    // construction indexed too, so the provider must not descend into them
+    // (docs/13 §3). This is what keeps incremental refresh O(new commits) on
+    // large repositories instead of re-walking the whole history.
+    //
+    // `indexed` is the set of commit oids already present in the storage,
+    // loaded once by the engine. The returned iterator borrows both `self`
+    // and `indexed`, so its lifetime `'w` is the shared region of the two.
+    fn walk_commits<'s, 'i, 'w>(
+        &'s self,
         starting_from: &[Oid],
-    ) -> Result<Box<dyn Iterator<Item = Result<Commit, IndexerError>> + '_>, IndexerError>;
+        indexed: &'i std::collections::HashSet<String>,
+    ) -> Result<Box<dyn Iterator<Item = Result<Commit, IndexerError>> + 'w>, IndexerError>
+    where
+        's: 'w,
+        'i: 'w;
 }
 
 pub trait StorageProvider {
     fn begin_transaction(&self) -> Result<Box<dyn Transaction + '_>, IndexerError>;
 
     fn get_indexed_refs(&self) -> Result<Vec<RefInfo>, IndexerError>;
+
+    /// Every commit oid currently in the index, loaded once per scan/refresh
+    /// (docs/13 §3): the engine passes it to [`GitProvider::walk_commits`] so
+    /// already-indexed commits are never re-read from the object database.
+    fn get_indexed_oids(&self) -> Result<std::collections::HashSet<String>, IndexerError>;
 
     /// Read a metadata key written by a previous scan/refresh (docs/09:
     /// rewritten-history detection and index freshness rely on it).

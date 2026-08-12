@@ -64,8 +64,14 @@ impl<'a> IndexService<'a> {
             .query_row("SELECT count(*) FROM commits", [], |row| row.get(0))
             .map_err(|e| anyhow::anyhow!("index corrupt: {e}"))?;
 
-        // Persist the analysis cache (docs/13 §3).
-        if let Ok(analysis) = gitx_analysis::analyze_repository(self.repo)
+        // Persist the analysis cache (docs/13 §3) — but only when it is not
+        // already fresh for HEAD. A no-op refresh (nothing changed) otherwise
+        // re-runs the full live analysis walk, which dominates refresh cost on
+        // large repositories; with a fresh cache the walk is skipped entirely
+        // and reads keep coming from SQLite (docs/13 §3 sub-second reads).
+        let analysis_fresh = gitx_analysis::cache::is_fresh(&conn.borrow(), self.repo);
+        if !analysis_fresh
+            && let Ok(analysis) = gitx_analysis::analyze_repository(self.repo)
             && let Ok(head) = self.repo.head_commit_id()
         {
             let mut conn = conn.borrow_mut();

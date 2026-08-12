@@ -3,6 +3,7 @@ use gitx_index::error::IndexerError;
 use gitx_index::models::{Commit, Oid, RefInfo};
 use rusqlite::OptionalExtension;
 use std::cell::{RefCell, RefMut};
+use std::collections::HashSet;
 use std::result::Result;
 
 /// SQLite-backed [`StorageProvider`] for the incremental indexer (docs/09).
@@ -45,6 +46,21 @@ impl StorageProvider for SqliteStorageProvider<'_> {
         )
         .optional()
         .map_err(|e| IndexerError::StorageError(e.to_string()))
+    }
+
+    fn get_indexed_oids(&self) -> Result<HashSet<String>, IndexerError> {
+        let conn = self.conn.borrow();
+        let mut stmt = conn
+            .prepare("SELECT oid FROM commits")
+            .map_err(|e| IndexerError::StorageError(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| IndexerError::StorageError(e.to_string()))?;
+        let mut set = HashSet::new();
+        for row in rows {
+            set.insert(row.map_err(|e| IndexerError::StorageError(e.to_string()))?);
+        }
+        Ok(set)
     }
 
     fn get_indexed_refs(&self) -> Result<Vec<RefInfo>, IndexerError> {

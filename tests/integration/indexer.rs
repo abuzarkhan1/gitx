@@ -2,6 +2,7 @@
 //! (docs/09: full scan + incremental refresh).
 
 use gitx_git::Repository;
+use gitx_index::contracts::{GitProvider, StorageProvider};
 use gitx_index::{Indexer, NoopProgress};
 use gitx_storage::{open_indexed, SqliteStorageProvider};
 use std::cell::RefCell;
@@ -80,6 +81,55 @@ fn refresh_stops_at_indexed_boundaries() {
         .expect("clear commits");
     indexer.refresh(&mut progress).expect("refresh after wipe");
     assert_eq!(commit_count(&conn), 3);
+}
+
+#[test]
+fn walk_stops_at_indexed_boundaries() {
+    // The provider's boundary-stop walk (docs/13 §6) is what keeps refresh
+    // O(new commits): a fully indexed history must yield nothing, and one new
+    // commit on top must yield exactly that commit — never the indexed past.
+    let Some(repo) = sample_repo() else {
+        eprintln!("skipping: git CLI unavailable");
+        return;
+    };
+    let gix = Repository::discover(repo.path()).expect("open fixture");
+
+    let conn = open_indexed(std::path::Path::new(":memory:")).expect("in-memory index");
+    let storage = SqliteStorageProvider::new(&conn);
+    let indexer = Indexer::new(&gix, &storage);
+    indexer.scan(&mut NoopProgress).expect("scan");
+
+    // Every tip is indexed: the walk must not visit a single commit.
+    let indexed = storage.get_indexed_oids().expect("indexed oids");
+    let tips: Vec<_> = gix
+        .read_refs()
+        .expect("refs")
+        .into_iter()
+        .map(|r| r.target)
+        .collect();
+    let walked = gix
+        .walk_commits(&tips, &indexed)
+        .expect("walk")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect");
+    assert_eq!(walked.len(), 0, "fully indexed history must yield nothing");
+
+    // One new commit on top: exactly it is walked, not the 3-commit history.
+    repo.write("notes.txt", "extra\n");
+    repo.commit("docs: add notes");
+    let gix = Repository::discover(repo.path()).expect("reopen fixture");
+    let tips: Vec<_> = gix
+        .read_refs()
+        .expect("refs")
+        .into_iter()
+        .map(|r| r.target)
+        .collect();
+    let walked = gix
+        .walk_commits(&tips, &indexed)
+        .expect("walk")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect");
+    assert_eq!(walked.len(), 1, "exactly the new commit is walked");
 }
 
 #[test]

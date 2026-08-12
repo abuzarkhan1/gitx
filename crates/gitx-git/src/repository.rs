@@ -17,10 +17,20 @@ impl Clone for Repository {
     }
 }
 
+/// Decoded-object cache budget (docs/13 §4 bounded caches). gix leaves its
+/// cache unset by default; history walks and per-commit tree diffs then
+/// re-decompress the same pack objects on every access (zlib-dominated). A
+/// memory-capped cache that grows gradually turns repeated reads into hash
+/// lookups; it is shared across Repository clones (each clone gets cache
+/// slots over the same object store).
+const OBJECT_CACHE_BYTES: usize = 128 * 1024 * 1024;
+
 impl Repository {
     pub fn discover(path: impl AsRef<Path>) -> Result<Self> {
         let started = std::time::Instant::now();
-        let repo = gix::discover(path.as_ref()).map_err(|e| GitError::OpenFailed(e.to_string()))?;
+        let mut repo =
+            gix::discover(path.as_ref()).map_err(|e| GitError::OpenFailed(e.to_string()))?;
+        repo.object_cache_size_if_unset(OBJECT_CACHE_BYTES);
         tracing::debug!(
             path = %path.as_ref().display(),
             git_dir = %repo.git_dir().display(),
@@ -31,7 +41,8 @@ impl Repository {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let repo = gix::open(path.as_ref()).map_err(|e| GitError::OpenFailed(e.to_string()))?;
+        let mut repo = gix::open(path.as_ref()).map_err(|e| GitError::OpenFailed(e.to_string()))?;
+        repo.object_cache_size_if_unset(OBJECT_CACHE_BYTES);
         Ok(Self { repo })
     }
 

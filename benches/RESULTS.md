@@ -25,3 +25,42 @@ repo.
 | branches | branch_intelligence_all_local | 24.417 ms |
 | search | search_fts_medium_repo | 411.69 µs |
 
+## 2026-08-13 — Large-repo validation (real clone)
+
+Dogfooding pass against a real large repository: the `clap` source clone at
+`/tmp/clap-dogfood` (github.com/clap-rs/clap), **9,070 commits**, ~24 MB `.git`,
+release build, warm OS cache, on the 2026-era MacBook. Measured with
+`/usr/bin/time -p`; TUI paint via tmux poll.
+
+Three fixes landed during this pass, so numbers are recorded before/after:
+
+1. **gix decoded-object cache** (`gitx_git::Repository`, docs/13 §4): gix leaves
+   its cache unset, so walks re-decompressed pack objects. A 128 MB memory-
+   capped cache turned repeated reads into hash lookups.
+2. **Boundary-stop incremental walk** (`GitProvider::walk_commits` + engine,
+   docs/13 §3): the provider never descends into commits already in the index,
+   so refresh touches O(new commits) objects instead of the whole history.
+3. **Analysis-cache freshness skip** (`IndexService::scan_with`): a no-op
+   refresh no longer re-runs the full live analysis when the cache is already
+   fresh for HEAD.
+
+| Scenario | Before | After |
+|---|---|---|
+| first-run `gitx health` (auto-refresh: full scan + analysis) | ~60 s | **3.66 s** |
+| no-op `gitx refresh` | ~16.5 s | **0.03 s** |
+| `gitx refresh` after +1 commit | ~16.5 s | **2.9 s** |
+| cached `gitx health` | — | **0.00 s** |
+| cached `gitx hotspots` | — | **0.01 s** |
+| `gitx search` (lazy in-memory index) | — | **0.26 s** |
+| TUI Overview first paint (index-backed) | — | **~0.95 s** |
+
+Cached reads stay sub-second on the 9k-commit repo (docs/13 §3 targets), and
+TUI startup is sub-second with a valid index. The remaining hot spot is the
+**analysis recompute** after HEAD moves (the `+1 commit` case): the analysis
+cache is keyed to HEAD and recomputed from scratch, so it is still
+O(history) — ~3 s here. Making the analysis cache incremental is future work.
+
+Index correctness on the large repo was spot-checked live: 9,070 commits / 650
+contributors / 631 files / 634 tags, and the TUI Overview rendered all four
+from the index rather than recomputing.
+
