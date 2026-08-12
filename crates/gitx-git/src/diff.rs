@@ -271,67 +271,82 @@ pub fn render_commit_patch(repo: &Repository, commit_id: ObjectId) -> Result<Str
     out.push('\n');
 
     for change in &changes {
-        let old_path = change.old_path.as_ref().unwrap_or(&change.path);
-        let old_bytes = repo
-            .blob_at_path(parent_tree.unwrap_or(commit_id), old_path)
-            .ok()
-            .flatten();
-        let new_bytes = repo
-            .blob_at_path(commit.tree_id, &change.path)
-            .ok()
-            .flatten();
-
-        out.push_str(&format!(
-            "diff --git a/{} b/{}\n",
-            old_path.display(),
-            change.path.display()
-        ));
-        match (&old_bytes, &new_bytes) {
-            (None, None) => continue,
-            (None, Some(_)) => {
-                out.push_str("new file mode 100644\n");
-            }
-            (Some(_), None) => {
-                out.push_str("deleted file mode 100644\n");
-            }
-            _ => {}
+        if let Some(patch) = render_file_patch(repo, parent_tree, commit.tree_id, change)? {
+            out.push_str(&patch);
         }
-        out.push_str(&format!(
-            "--- {}\n",
-            if old_bytes.is_some() {
-                format!("a/{}", old_path.display())
-            } else {
-                "/dev/null".to_string()
-            }
-        ));
-        out.push_str(&format!(
-            "+++ {}\n",
-            if new_bytes.is_some() {
-                format!("b/{}", change.path.display())
-            } else {
-                "/dev/null".to_string()
-            }
-        ));
-
-        let old_bytes = old_bytes.unwrap_or_default();
-        let new_bytes = new_bytes.unwrap_or_default();
-
-        // A single hunk covering the whole file: every line of the old version
-        // is deleted and every line of the new version added. This is a valid
-        // unified diff (git apply accepts it) and, for recovery, preserves the
-        // complete file state at that commit.
-        let old_count = count_lines(&old_bytes);
-        let new_count = count_lines(&new_bytes);
-        out.push_str(&format!("@@ -1,{old_count} +1,{new_count} @@\n"));
-        for line in split_utf8_lines(&old_bytes) {
-            out.push_str(&format!("-{line}\n"));
-        }
-        for line in split_utf8_lines(&new_bytes) {
-            out.push_str(&format!("+{line}\n"));
-        }
-        out.push('\n');
     }
     Ok(out)
+}
+
+/// Render a unified patch for one file change between two trees (docs/13
+/// §8: callers stream files one at a time so only one file's hunks are in
+/// memory). Returns `None` when both blobs are missing.
+pub fn render_file_patch(
+    repo: &Repository,
+    old_tree: Option<ObjectId>,
+    new_tree: ObjectId,
+    change: &FileChange,
+) -> Result<Option<String>> {
+    let old_path = change.old_path.as_ref().unwrap_or(&change.path);
+    let old_bytes = repo
+        .blob_at_path(old_tree.unwrap_or(new_tree), old_path)
+        .ok()
+        .flatten();
+    let new_bytes = repo.blob_at_path(new_tree, &change.path).ok().flatten();
+    if old_bytes.is_none() && new_bytes.is_none() {
+        return Ok(None);
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "diff --git a/{} b/{}\n",
+        old_path.display(),
+        change.path.display()
+    ));
+    match (&old_bytes, &new_bytes) {
+        (None, Some(_)) => {
+            out.push_str("new file mode 100644\n");
+        }
+        (Some(_), None) => {
+            out.push_str("deleted file mode 100644\n");
+        }
+        _ => {}
+    }
+    out.push_str(&format!(
+        "--- {}\n",
+        if old_bytes.is_some() {
+            format!("a/{}", old_path.display())
+        } else {
+            "/dev/null".to_string()
+        }
+    ));
+    out.push_str(&format!(
+        "+++ {}\n",
+        if new_bytes.is_some() {
+            format!("b/{}", change.path.display())
+        } else {
+            "/dev/null".to_string()
+        }
+    ));
+
+    let old_bytes = old_bytes.unwrap_or_default();
+    let new_bytes = new_bytes.unwrap_or_default();
+
+    // A single hunk covering the whole file: every line of the old version
+    // is deleted and every line of the new version added. This is a valid
+    // unified diff (git apply accepts it) and preserves the complete file
+    // state at that ref.
+    let old_count = count_lines(&old_bytes);
+    let new_count = count_lines(&new_bytes);
+    out.push_str(&format!("@@ -1,{old_count} +1,{new_count} @@\n"));
+    for line in split_utf8_lines(&old_bytes) {
+        out.push_str(&format!("-{line}\n"));
+    }
+    for line in split_utf8_lines(&new_bytes) {
+        out.push_str(&format!("+{line}\n"));
+    }
+    out.push('\n');
+    Ok(Some(out))
 }
 
 /// Split bytes into UTF-8 lines (content only, trailing newline stripped).

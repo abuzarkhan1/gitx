@@ -199,6 +199,20 @@ gitx release diff <REF1> <REF2>
 
 `gitx release <TAG>` is shorthand for `gitx release show <TAG>`.
 
+## 17.5 Diff
+
+```bash
+gitx diff <REF1> <REF2>
+gitx diff <REF1> <REF2> --path <PREFIX>
+gitx diff <REF1> <REF2> --stat
+```
+
+Unified diff between any two refs (branch, tag, or commit id), processed
+file-by-file so only one file's hunks are in memory at a time (docs/13 §8).
+On a TTY the output pages through `less -R` (docs/25); piped output prints
+directly. `--stat` prints the file list with insertions/deletions and pages
+like other long output.
+
 ## 18. Output contract
 
 Human output is optimized for terminal readability.

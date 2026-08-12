@@ -57,3 +57,7 @@ path = "integration/services.rs"
 [[test]]
 name = "symbol_history"
 path = "integration/symbol_history.rs"
+
+[[test]]
+name = "diff"
+path = "integration/diff.rs"

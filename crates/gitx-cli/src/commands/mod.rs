@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod completions;
 pub mod config;
+pub mod diff;
 pub mod history;
 pub mod index;
 pub mod recovery;
@@ -85,6 +86,12 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
             None => analysis::symbols(&cli, path.as_deref()),
         },
         Commands::Graph => analysis::graph(&cli),
+        Commands::Diff {
+            from,
+            to,
+            path,
+            stat,
+        } => diff::diff(&cli, &from, &to, path.as_deref(), stat),
         Commands::Search {
             query,
             since,

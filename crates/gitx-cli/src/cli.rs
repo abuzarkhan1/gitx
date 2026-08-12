@@ -176,6 +176,17 @@ pub enum Commands {
     },
     /// Module/file dependency graph of the HEAD tree (docs/21 Stage 6).
     Graph,
+    /// Unified diff between two refs, streamed per file (docs/13 §8).
+    Diff {
+        from: String,
+        to: String,
+        /// Restrict to a path prefix.
+        #[arg(long)]
+        path: Option<String>,
+        /// Summary only (file list + insertions/deletions).
+        #[arg(long)]
+        stat: bool,
+    },
     /// Search commits, files, authors, branches and tags.
     Search {
         query: String,
