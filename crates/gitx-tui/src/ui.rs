@@ -2,11 +2,13 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 
 use crate::app::{App, View};
 use crate::views;
+use crate::views::theme;
 
 /// Minimum usable terminal size (docs/08 §6 responsive small-terminal layout).
 /// Below this the layout collapses; show guidance instead of broken panels.
@@ -22,7 +24,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Header
+            Constraint::Length(3), // Header (with breadcrumb)
             Constraint::Min(0),    // Main content
             Constraint::Length(1), // Status bar
         ])
@@ -55,7 +57,10 @@ fn render_too_small(f: &mut Frame, area: Rect) {
     f.render_widget(p, rect);
 }
 
+/// Header with branding + a "you are here" breadcrumb (docs/08 #19): the
+/// current view name is always visible in the content area's top-left corner.
 fn render_header(f: &mut Frame, app: &App, area: Rect) {
+    let t = theme::global();
     let name = app
         .repo_path
         .as_deref()
@@ -73,15 +78,51 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         .map(|b| b.name.clone())
         .unwrap_or_else(|| "-".into());
     let state = app.repo_state.as_deref().unwrap_or("clean").to_lowercase();
+    let state_color = if state == "clean" {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
+    let view_name = view_label(app.current_view);
 
-    let header = Paragraph::new(format!(" GitX   {name}   {branch}   {state} "))
-        .block(Block::default().borders(Borders::ALL))
-        .style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(
+            " GitX ",
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!(" {name}   ")),
+        Span::styled(branch.to_string(), Style::default().fg(Color::Cyan)),
+        Span::raw("  "),
+        Span::styled(state, Style::default().fg(state_color)),
+        Span::raw("  "),
+        Span::styled(
+            format!("▸ {view_name}"),
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        ),
+    ]))
+    .block(Block::default().borders(Borders::ALL))
+    .style(Style::default().fg(t.fg));
     f.render_widget(header, area);
+}
+
+fn view_label(view: View) -> &'static str {
+    match view {
+        View::Overview => "Overview",
+        View::Timeline => "Timeline",
+        View::Commits => "Commits",
+        View::Branches => "Branches",
+        View::Files => "Files",
+        View::Contributors => "Contributors",
+        View::Hotspots => "Hotspots",
+        View::Ownership => "Ownership",
+        View::Architecture => "Architecture",
+        View::Dependencies => "Dependencies",
+        View::Risk => "Risk",
+        View::Health => "Health",
+        View::Recovery => "Recovery",
+        View::Search => "Search",
+        View::Detail => "Detail",
+    }
 }
 
 fn render_main(f: &mut Frame, app: &mut App, area: Rect) {
@@ -98,6 +139,7 @@ fn render_main(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_navigation(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = theme::global();
     let views = vec![
         "Overview",
         "Timeline",
@@ -122,7 +164,12 @@ fn render_navigation(f: &mut Frame, app: &mut App, area: Rect) {
 
     let list = List::new(items)
         .block(Block::default().title(" Navigation ").borders(Borders::ALL))
-        .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .highlight_style(
+            Style::default()
+                .bg(t.sel_bg)
+                .fg(t.fg)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_symbol(">> ");
 
     f.render_stateful_widget(list, area, &mut state);
@@ -146,6 +193,7 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             area,
             app.timeline.as_deref(),
             app.timeline_areas.as_deref(),
+            app.commit_files.as_deref(),
             app.scroll,
             app.selected,
         ),
@@ -154,6 +202,7 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             area,
             app.branches.as_deref(),
             app.branch_tips.as_deref(),
+            app.branch_intel.as_deref(),
             app.scroll,
             app.selected,
         ),
@@ -167,18 +216,25 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             app.scroll,
             app.selected,
         ),
-        View::Hotspots => {
-            views::hotspots::render(f, area, app.hotspots.as_ref(), app.scroll, app.selected)
-        }
+        View::Hotspots => views::hotspots::render(
+            f,
+            area,
+            app.hotspots.as_ref(),
+            app.hotspot_sort,
+            app.scroll,
+            app.selected,
+        ),
         View::Ownership => {
             views::ownership::render(f, area, app.hotspots.as_ref(), app.scroll, app.selected)
         }
-        View::Architecture => {
-            // Architecture panel (docs/08): directory/module evolution from the
-            // analyzed file set.
-            views::overview::architecture_panel(f, area, app.hotspots.as_ref());
-            0
-        }
+        View::Architecture => views::architecture::render(
+            f,
+            area,
+            app.arch_diff.as_ref(),
+            app.hotspots.as_ref(),
+            app.scroll,
+            app.selected,
+        ),
         View::Dependencies => views::dependencies::render(
             f,
             area,
@@ -195,6 +251,7 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             f,
             area,
             &app.search_query,
+            app.search_pending,
             app.search_results.as_deref(),
             app.in_content,
             app.scroll,
@@ -208,6 +265,10 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             app.selected,
         ),
     };
+    app.last_row_count = row_count;
+    // Visible rows inside the content list (matches common::render_scrollable
+    // and views::search::render): keeps the cursor highlight in the window.
+    app.visible = area.height.saturating_sub(2).max(1) as usize;
     if app.selected >= row_count && row_count > 0 {
         app.selected = row_count - 1;
     }
@@ -221,45 +282,116 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
+/// Contextual status bar (docs/08 #20 per-row hints + loading progress):
+/// shows an animated spinner while data/search loads, the visible-row range,
+/// and what the selected row will do when Enter is pressed.
 fn render_status_bar(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = theme::global();
+    let spinner = spinner_frame(app.load_frame);
     let status = if app.loading {
-        " Reloading... | Press 'q' to quit "
+        if app.current_view == View::Search {
+            format!(" {spinner} Search is live — repository data still loading... ")
+        } else {
+            format!(" {spinner} Reloading repository data... | Press 'q' to quit ")
+        }
     } else if app.show_help {
-        " Esc Close help  q Quit "
-    } else if app.current_view == crate::app::View::Detail {
-        " j/k Scroll  Enter Next  Esc/← Close detail  q Quit "
+        " Esc Close help  q Quit ".to_string()
+    } else if app.current_view == View::Detail {
+        format!(
+            " j/k Scroll  {}   Esc/← Close detail  q Quit ",
+            visible_range(app, f.area().height)
+        )
+    } else if app.current_view == View::Search {
+        if app.search_pending {
+            format!(
+                " {spinner} Searching index... (FTS over commits, files, authors, branches, tags) "
+            )
+        } else if app.search_query.trim().is_empty() {
+            " Type to search  Enter/← Done  q Quit ".to_string()
+        } else {
+            " ↑↓ Move  Enter Open result  Esc Done  q Quit ".to_string()
+        }
+    } else if app.current_view == View::Hotspots {
+        format!(
+            " s Sort: {}   {}   Enter View file   / Search   r Refresh   q Quit ",
+            match app.hotspot_sort {
+                0 => "score",
+                1 => "changes",
+                _ => "churn",
+            },
+            visible_range(app, f.area().height)
+        )
     } else if app.in_content {
-        " j/k Scroll  Enter Open  Esc/← Back to navigation  / Search  r Refresh  q Quit "
+        format!(
+            " j/k Scroll  {}   Enter Open  Esc/← Back  / Search  r Refresh  q Quit ",
+            visible_range(app, f.area().height)
+        )
+    } else if !app.nav_used {
+        " ↑↓ Navigate · Enter Open a view · / Search · ? Help · r Refresh · q Quit ".to_string()
     } else {
-        " ↑↓ Navigate  Enter Open  / Search  ? Help  r Refresh  q Quit "
+        " ↑↓ Navigate  Enter Open  / Search  ? Help  r Refresh  q Quit ".to_string()
     };
 
-    let p = Paragraph::new(status).style(Style::default().bg(Color::Blue).fg(Color::White));
+    let p = Paragraph::new(status).style(Style::default().bg(t.status_bg).fg(Color::White));
     f.render_widget(p, area);
+}
+
+/// Spinner frames (docs/08 loading progress / #20 async search): animated
+/// while the background loader or an FTS search is running.
+fn spinner_frame(frame: u8) -> &'static str {
+    const FRAMES: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+    FRAMES[(frame as usize) % FRAMES.len()]
+}
+
+/// “showing a–b of N” scroll-position indicator (docs/08): the visible row
+/// range derived from the scroll offset, the content height, and the view's
+/// total row count.
+fn visible_range(app: &App, total_height: u16) -> String {
+    let row_count = app.last_row_count;
+    if row_count == 0 {
+        return "showing 0 rows".to_string();
+    }
+    // Header (3 rows incl. borders) + status bar (1) + list borders (2).
+    let content_h = total_height.saturating_sub(4);
+    let visible = (content_h.saturating_sub(2)).max(1) as usize;
+    let scroll = if app.current_view == View::Detail {
+        app.detail_scroll
+    } else {
+        app.scroll
+    };
+    let first = scroll + 1;
+    let last = (scroll + visible).min(row_count);
+    format!("showing {first}–{last} of {row_count}")
 }
 
 /// Keybinding help overlay (docs/08 §4: `?` help).
 fn render_help(f: &mut Frame, area: Rect) {
+    let t = theme::global();
     let content = vec![
-        "GitX keybindings".to_string(),
-        String::new(),
-        "  ↑ / k          up".into(),
-        "  ↓ / j          down".into(),
-        "  ← / h          back".into(),
-        "  → / l          open".into(),
-        "  Enter          select / drill down".into(),
-        "  Esc            close dialog / back".into(),
-        "  /              search".into(),
-        "  ?              this help".into(),
-        "  r              refresh".into(),
-        "  q / Ctrl-C     quit".into(),
-        String::new(),
-        "In a list: j/k scrolls, Enter opens the selected row's detail.".into(),
+        Line::from(Span::styled(
+            "GitX keybindings",
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        )),
+        Line::default(),
+        Line::raw("  ↑ / k          up"),
+        Line::raw("  ↓ / j          down"),
+        Line::raw("  ← / h          back"),
+        Line::raw("  → / l          open"),
+        Line::raw("  Enter          select / drill down"),
+        Line::raw("  Esc            close dialog / back"),
+        Line::raw("  /              search"),
+        Line::raw("  ?              this help"),
+        Line::raw("  r              refresh"),
+        Line::raw("  s              (Hotspots) change sort"),
+        Line::raw("  1–9, o/t/c/b/f/u/s/w/a/d/x/e/v   jump to a view"),
+        Line::raw("  q / Ctrl-C     quit"),
+        Line::default(),
+        Line::raw("In a list: j/k scrolls, Enter opens the selected row's detail."),
     ];
     let rect = centered_rect(55, 60, area);
     let list = List::new(content)
         .block(Block::default().title(" Help ").borders(Borders::ALL))
-        .highlight_style(Style::default().bg(Color::DarkGray));
+        .highlight_style(Style::default().bg(t.sel_bg));
     f.render_widget(list, rect);
 }
 

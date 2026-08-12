@@ -1,6 +1,11 @@
-use crate::views::common;
+use crate::views::{common, theme};
 use gitx_analysis::manifest::Dependency;
-use ratatui::{Frame, layout::Rect};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Color, Style},
+    text::{Line, Span},
+};
 use std::path::PathBuf;
 
 pub fn render(
@@ -10,22 +15,40 @@ pub fn render(
     scroll: usize,
     selected: usize,
 ) -> usize {
-    let rows: Vec<String> = match dependencies {
-        None => vec!["No repository loaded.".to_string()],
-        Some([]) => vec!["No supported dependency manifests found in HEAD.".to_string()],
+    let rows: Vec<Line<'static>> = match dependencies {
+        None => common::empty_rows("repository"),
+        Some([]) => vec![
+            theme::plain("No supported dependency manifests found in HEAD."),
+            theme::dim("Supported: Cargo.toml/lock, package.json/lock, go.mod/sum."),
+        ],
         Some(list) => {
             let mut out = Vec::new();
             for (path, deps) in list {
-                out.push(path.display().to_string());
+                out.push(theme::strong(path.display().to_string(), Color::Cyan));
+                if deps.is_empty() {
+                    out.push(theme::dim("    (no dependencies declared)"));
+                }
                 for dep in deps {
-                    match &dep.version {
-                        Some(v) => out.push(format!("    {} {v}", dep.name)),
-                        None => out.push(format!("    {}", dep.name)),
-                    }
+                    let line = match &dep.version {
+                        Some(v) => Line::from(vec![
+                            Span::raw("    "),
+                            Span::styled(dep.name.clone(), Style::default().fg(Color::White)),
+                            Span::styled(format!(" {v}"), Style::default().fg(Color::DarkGray)),
+                        ]),
+                        None => theme::plain(format!("    {}", dep.name)),
+                    };
+                    out.push(line);
                 }
             }
             out
         }
     };
-    common::render_scrollable(f, area, " Dependencies ", &rows, scroll, selected)
+    common::render_scrollable(
+        f,
+        area,
+        " Dependencies — declared in HEAD ",
+        &rows,
+        scroll,
+        selected,
+    )
 }

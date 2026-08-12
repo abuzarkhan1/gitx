@@ -18,6 +18,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 gitx-core = { path = "../gitx-core" }
 gitx-git = { path = "../gitx-git" }
 gitx-history = { path = "../gitx-history" }
+gitx-graph = { path = "../gitx-graph" }
 gitx-analysis = { path = "../gitx-analysis" }
 gitx-services = { path = "../gitx-services" }
 gitx-storage = { path = "../gitx-storage" }

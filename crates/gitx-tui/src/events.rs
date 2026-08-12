@@ -1,10 +1,11 @@
-use crossterm::event::{Event as CrosstermEvent, EventStream, KeyEvent};
+use crossterm::event::{Event as CrosstermEvent, EventStream, KeyEvent, MouseEvent};
 use futures::{FutureExt, StreamExt};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 pub enum Event {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     Tick,
     Resize(u16, u16),
 }
@@ -40,6 +41,10 @@ impl EventHandler {
                                         break;
                                     }
                                     CrosstermEvent::Key(_) => {}
+                                    CrosstermEvent::Mouse(mouse) if _sender.send(Event::Mouse(mouse)).is_err() => {
+                                        break;
+                                    }
+                                    CrosstermEvent::Mouse(_) => {}
                                     CrosstermEvent::Resize(w, h) if _sender.send(Event::Resize(w, h)).is_err() => {
                                         break;
                                     }

@@ -84,15 +84,45 @@ pub struct App {
     /// Tip-commit timestamp per branch, aligned with `branches` (docs/08
     /// Branch view: age + activity).
     pub branch_tips: Option<Vec<i64>>,
+    /// Ahead/behind intelligence per branch, aligned with `branches` (docs/08
+    /// Branch view: ahead/behind bar; docs/10 §5).
+    pub branch_intel: Option<Vec<Option<gitx_analysis::branch::BranchIntelligence>>>,
     /// Repository state string from gix (clean/merge/rebase...).
     pub repo_state: Option<String>,
     /// Per-sub-score evidence lines for the Health view (docs/08 §3: selecting
     /// a sub-score reveals its evidence).
     pub health_evidence: Vec<Vec<String>>,
+    /// Hotspots sort mode (docs/08 Hotspots sortable table): 0=score,
+    /// 1=change frequency, 2=churn. Toggled with `s`.
+    pub hotspot_sort: u8,
+    /// Row count of the current view's last render (docs/08: scroll-position
+    /// indicator in the status bar — “showing x–y of N”).
+    pub last_row_count: usize,
+    /// Visible row count of the current view's last render (used to keep the
+    /// cursor highlight inside the window while j/k move the selection).
+    pub visible: usize,
+    /// Changed-file path strings per timeline commit, aligned with `timeline`
+    /// (docs/08 Commit view: related-commits panel).
+    pub commit_files: Option<Vec<Vec<String>>>,
+    /// Architecture before/after comparison (docs/08 Architecture view,
+    /// docs/10 §10): HEAD vs the newest commit ≥30 days old.
+    pub arch_diff: Option<ArchDiff>,
+    /// Spinner frame while the background loader runs (docs/08 loading
+    /// progress: a real animated indicator, not just text).
+    pub load_frame: u8,
+    /// True once the user has navigated at all — the first-run onboarding
+    /// hint shows until then (docs/08 #31).
+    pub nav_used: bool,
+    /// True while an FTS search is running on a worker thread (docs/08: the
+    /// UI never freezes on large repositories).
+    pub search_pending: bool,
     /// Receiver for the background data load (docs/08 loading progress): the
     /// repo data is computed on a worker thread so the UI renders immediately
     /// and the status bar shows progress while it loads.
     data_rx: Option<std::sync::mpsc::Receiver<AppData>>,
+    /// Receiver for async FTS search results (docs/08 Search: the query runs
+    /// on a worker thread; results land here on the next tick).
+    search_rx: Option<std::sync::mpsc::Receiver<Vec<gitx_services::SearchHit>>>,
 }
 
 impl Default for App {
@@ -141,9 +171,19 @@ impl App {
             timeline_file_counts: None,
             timeline_areas: None,
             branch_tips: None,
+            branch_intel: None,
             repo_state: None,
             health_evidence: Vec::new(),
+            hotspot_sort: 0,
+            last_row_count: 0,
+            visible: 1,
+            commit_files: None,
+            arch_diff: None,
+            load_frame: 0,
+            nav_used: false,
+            search_pending: false,
             data_rx: Some(rx),
+            search_rx: None,
         }
     }
 
@@ -162,11 +202,15 @@ impl App {
         self.timeline_file_counts = data.timeline_file_counts;
         self.timeline_areas = data.timeline_areas;
         self.branch_tips = data.branch_tips;
+        self.branch_intel = data.branch_intel;
         self.repo_state = data.repo_state;
         self.health_evidence = data.health_evidence;
+        self.commit_files = data.commit_files;
+        self.arch_diff = data.arch_diff;
         self.loading = false;
         // Data changed: invalidate stale search results.
         self.search_results = None;
+        self.search_pending = false;
     }
 
     /// Reload all repository data on a worker thread (docs/08: `r` refresh).
@@ -194,6 +238,32 @@ impl App {
             }
             Err(_) => false,
         }
+    }
+
+    /// Poll the async search worker; returns true when results landed.
+    pub fn poll_search(&mut self) -> bool {
+        let Some(rx) = &self.search_rx else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(hits) => {
+                self.search_results = Some(hits);
+                self.search_pending = false;
+                self.search_rx = None;
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.search_pending = false;
+                self.search_rx = None;
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Toggle the Hotspots sort mode (docs/08 sortable table).
+    pub fn cycle_hotspot_sort(&mut self) {
+        self.hotspot_sort = (self.hotspot_sort + 1) % 3;
     }
 
     pub fn quit(&mut self) {
@@ -238,6 +308,7 @@ impl App {
         self.in_content = true;
         self.scroll = 0;
         self.selected = 0;
+        self.nav_used = true;
     }
 
     /// The nav index for the current view (used to keep the sidebar highlight
@@ -262,8 +333,30 @@ impl App {
         };
     }
 
-    /// Scroll the current view down by one row. The renderer clamps the offset
-    /// to the actual row count, so an unbounded increment is safe.
+    /// Move the cursor down one row. The selection is what Enter opens and
+    /// the status bar reports (docs/08 #20), so j/k move it; the window only
+    /// scrolls when the cursor would leave the visible area.
+    pub fn cursor_down(&mut self) {
+        let max = self.last_row_count.saturating_sub(1);
+        if self.selected < max {
+            self.selected += 1;
+            let visible = self.visible.max(1);
+            if self.selected >= self.scroll + visible {
+                self.scroll = self.selected.saturating_add(1).saturating_sub(visible);
+            }
+        }
+    }
+
+    /// Move the cursor up one row (see [`App::cursor_down`]).
+    pub fn cursor_up(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        }
+    }
+
+    /// Scroll the current view down by one row without moving the cursor
+    /// (mouse wheel).
     pub fn scroll_down(&mut self) {
         self.scroll = self.scroll.saturating_add(1);
     }
@@ -308,6 +401,7 @@ impl App {
 
         // Remember which panel opened the detail so Esc returns there.
         self.sync_nav();
+        self.nav_used = true;
         let text = self.render_detail(&detail);
         self.detail = Some(detail);
         self.detail_text = Some(text);
@@ -361,39 +455,50 @@ impl App {
     }
 
     /// Run an FTS search through `SearchService` across commits, files,
-    /// authors, branches and tags (docs/08 Search, docs/11). Falls back to an
-    /// empty result list when the repository cannot be opened.
+    /// authors, branches and tags (docs/08 Search, docs/11). Runs on a worker
+    /// thread so a big repository never freezes the UI (docs/08 #20); results
+    /// land via [`App::poll_search`] on the next tick.
     pub fn run_search(&mut self) {
         let raw = self.search_query.trim();
         if raw.is_empty() {
             self.search_results = None;
+            self.search_pending = false;
+            self.search_rx = None;
             return;
         }
-        let repo = match &self.repo_path {
-            Some(path) => match gitx_git::Repository::discover(path) {
-                Ok(r) => r,
-                Err(_) => {
-                    self.search_results = Some(Vec::new());
-                    return;
-                }
-            },
+        let repo_path = match &self.repo_path {
+            Some(path) => path.clone(),
             None => {
                 self.search_results = Some(Vec::new());
+                self.search_pending = false;
+                self.search_rx = None;
                 return;
             }
         };
         // FTS5-safe phrase query: quote the input (doubling embedded quotes).
         let query = format!("\"{}\"", raw.replace('"', "\"\""));
-        let service = gitx_services::SearchService::new(&repo);
-        let options = gitx_services::SearchOptions {
-            commits: true,
-            files: true,
-            authors: true,
-            branches: true,
-            tags: true,
-            ..Default::default()
-        };
-        self.search_results = Some(service.search(&query, &options).unwrap_or_default());
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.search_rx = Some(rx);
+        self.search_pending = true;
+        std::thread::spawn(move || {
+            let repo = gitx_git::Repository::discover(&repo_path);
+            let hits = repo
+                .ok()
+                .map(|r| {
+                    let service = gitx_services::SearchService::new(&r);
+                    let options = gitx_services::SearchOptions {
+                        commits: true,
+                        files: true,
+                        authors: true,
+                        branches: true,
+                        tags: true,
+                        ..Default::default()
+                    };
+                    service.search(&query, &options).unwrap_or_default()
+                })
+                .unwrap_or_default();
+            let _ = tx.send(hits);
+        });
     }
 }
 
@@ -410,6 +515,24 @@ pub struct Contributor {
     /// Number of distinct files the author touched (0 when unknown, e.g.
     /// when reading from the analysis cache).
     pub files_touched: u64,
+    /// Top directories the author works in, most-touched first (docs/08
+    /// Contributors: areas / ownership concentration). Empty when unknown.
+    pub areas: Vec<String>,
+}
+
+/// Architecture before/after comparison (docs/08 Architecture view): the
+/// structural diff between HEAD and the newest commit ≥30 days old.
+#[derive(Debug, Clone)]
+pub struct ArchDiff {
+    pub from: String,
+    pub to: String,
+    pub added: usize,
+    pub removed: usize,
+    pub modified: usize,
+    pub added_files: Vec<String>,
+    pub removed_files: Vec<String>,
+    /// Directories that gained at least one file (docs/10 §10 modules added).
+    pub modules_added: Vec<String>,
 }
 
 pub struct AppData {
@@ -426,8 +549,11 @@ pub struct AppData {
     pub timeline_file_counts: Option<Vec<u32>>,
     pub timeline_areas: Option<Vec<String>>,
     pub branch_tips: Option<Vec<i64>>,
+    pub branch_intel: Option<Vec<Option<gitx_analysis::branch::BranchIntelligence>>>,
     pub repo_state: Option<String>,
     pub health_evidence: Vec<Vec<String>>,
+    pub commit_files: Option<Vec<Vec<String>>>,
+    pub arch_diff: Option<ArchDiff>,
 }
 
 /// Load repository data eagerly at startup by discovering the repository from
@@ -451,8 +577,11 @@ fn load_repo_stats() -> AppData {
                 timeline_file_counts: None,
                 timeline_areas: None,
                 branch_tips: None,
+                branch_intel: None,
                 repo_state: None,
                 health_evidence: Vec::new(),
+                commit_files: None,
+                arch_diff: None,
             };
         }
     };
@@ -478,12 +607,18 @@ fn load_repo_stats() -> AppData {
     let branches = repo.branches().ok();
 
     // Contributors from the timeline: commit count + first/last activity +
-    // files touched (from live analysis author_lines; empty from the cache).
-    let files_by_author = hotspots.as_ref().map(|a| {
-        let mut map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    // files touched + top areas (from live analysis author_lines, keyed by
+    // the raw author name; empty from the cache).
+    // Author identity → files they added lines to (keyed like the pipeline's
+    // author_lines: `Name <email>`). Used for files_touched + top areas.
+    let author_files = hotspots.as_ref().map(|a| {
+        let mut map: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
         for file in &a.files {
             for author in file.author_lines.keys() {
-                *map.entry(author.clone()).or_insert(0) += 1;
+                map.entry(author.clone())
+                    .or_default()
+                    .push(file.path.display().to_string());
             }
         }
         map
@@ -500,12 +635,32 @@ fn load_repo_stats() -> AppData {
                 first_activity: i64::MAX,
                 last_activity: i64::MIN,
                 files_touched: 0,
+                areas: Vec::new(),
             });
             entry.commits += 1;
             entry.first_activity = entry.first_activity.min(c.author.time);
             entry.last_activity = entry.last_activity.max(c.author.time);
-            if let Some(map) = &files_by_author {
-                entry.files_touched = map.get(&key).copied().unwrap_or(0);
+            // Match on the full identity — author_lines is keyed by
+            // `Name <email>` (docs/05 identity normalization).
+            let identity = format!("{} <{}>", c.author.name, c.author.email);
+            if let Some(map) = &author_files
+                && let Some(files) = map.get(&identity)
+            {
+                entry.files_touched = files.len() as u64;
+                // Top areas: directories the author touches most.
+                let mut dirs: std::collections::HashMap<String, u32> =
+                    std::collections::HashMap::new();
+                for f in files {
+                    let dir = std::path::Path::new(f)
+                        .parent()
+                        .filter(|p| !p.as_os_str().is_empty())
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| ".".into());
+                    *dirs.entry(dir).or_insert(0) += 1;
+                }
+                let mut areas: Vec<(String, u32)> = dirs.into_iter().collect();
+                areas.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+                entry.areas = areas.into_iter().take(3).map(|(d, _)| d).collect();
             }
         }
         let mut list: Vec<Contributor> = counts.into_values().collect();
@@ -528,7 +683,9 @@ fn load_repo_stats() -> AppData {
                     .unwrap_or_default();
                 let mut dirs: std::collections::HashMap<String, u32> =
                     std::collections::HashMap::new();
+                let mut files: Vec<String> = Vec::new();
                 for change in &changes {
+                    files.push(change.path.display().to_string());
                     let dir = change
                         .path
                         .parent()
@@ -538,16 +695,25 @@ fn load_repo_stats() -> AppData {
                     *dirs.entry(dir).or_insert(0) += 1;
                 }
                 let top = dirs.into_iter().max_by_key(|(_, n)| *n).map(|(d, _)| d);
-                (changes.len() as u32, top.unwrap_or_default())
+                (changes.len() as u32, top.unwrap_or_default(), files)
             })
-            .collect::<Vec<(u32, String)>>()
+            .collect::<Vec<(u32, String, Vec<String>)>>()
     });
     let timeline_file_counts = per_commit_areas
         .as_ref()
-        .map(|v| v.iter().map(|(n, _)| *n).collect());
+        .map(|v| v.iter().map(|(n, _, _)| *n).collect());
     let timeline_areas = per_commit_areas
         .as_ref()
-        .map(|v| v.iter().map(|(_, a)| a.clone()).collect());
+        .map(|v| v.iter().map(|(_, a, _)| a.clone()).collect());
+    // Changed-file sets per commit (docs/08 Commit view related-commits).
+    let commit_files = per_commit_areas
+        .as_ref()
+        .map(|v| v.iter().map(|(_, _, f)| f.clone()).collect());
+
+    // Architecture before/after (docs/08 Architecture view, docs/10 §10):
+    // HEAD vs the newest commit ≥30 days old (falling back to the oldest
+    // commit in the window).
+    let arch_diff = compute_arch_diff(&repo, timeline.as_deref()).ok().flatten();
 
     // Weekly commit counts, last 12 weeks (docs/08 Overview activity chart).
     let activity = timeline.as_ref().map(|commits| {
@@ -585,6 +751,28 @@ fn load_repo_stats() -> AppData {
             .collect()
     });
 
+    // Ahead/behind intelligence vs the current branch (docs/08 Branch view
+    // ahead/behind bar; docs/10 §5). Local branches only, so remote refs
+    // (which don't compare cleanly) keep a None entry.
+    let branch_intel = branches.as_ref().map(|list| {
+        let current = repo.head_commit_id().ok().and_then(|id| {
+            list.iter()
+                .find(|b| !b.is_remote && b.target == id)
+                .cloned()
+        });
+        list.iter()
+            .map(|b| {
+                if b.is_remote {
+                    None
+                } else {
+                    gitx_analysis::branch::branch_intelligence(&repo, b, current.as_ref())
+                        .ok()
+                        .flatten()
+                }
+            })
+            .collect()
+    });
+
     let dependencies = gitx_analysis::manifest::head_dependencies(&repo).ok();
     // Cap the object-database scan so TUI startup stays fast on large repos
     // (the CLI `gitx recovery` does the full scan on demand).
@@ -608,9 +796,94 @@ fn load_repo_stats() -> AppData {
         timeline_file_counts,
         timeline_areas,
         branch_tips,
+        branch_intel,
         repo_state,
         health_evidence,
+        commit_files,
+        arch_diff,
     }
+}
+
+/// Structural before/after comparison (docs/08 Architecture view): snapshot
+/// the HEAD tree and the newest commit ≥30 days old, then diff them with
+/// `gitx_graph::compare`. Returns None when there is nothing to compare.
+fn compute_arch_diff(
+    repo: &gitx_git::Repository,
+    timeline: Option<&[gitx_git::models::Commit]>,
+) -> anyhow::Result<Option<ArchDiff>> {
+    let head_id = repo.head_commit_id()?;
+    let head = repo.find_commit(head_id)?;
+    let cutoff = chrono::Utc::now().timestamp() - 30 * 86_400;
+    let from_commit = timeline
+        .and_then(|list| {
+            // Newest-first: first commit at least 30 days old, else the oldest.
+            list.iter()
+                .find(|c| c.author.time <= cutoff)
+                .or_else(|| list.last())
+                .cloned()
+        })
+        .filter(|c| c.id != head.id);
+    let Some(from) = from_commit else {
+        return Ok(None);
+    };
+
+    let old = snapshot_from_tree(repo, from.tree_id, &format!("{}", from.id))?;
+    let new = snapshot_from_tree(repo, head.tree_id, &format!("{}", head.id))?;
+    let diff = gitx_graph::compare::compare_snapshots(&old, &new);
+
+    let added_files: Vec<String> = diff.added.iter().map(|p| p.display().to_string()).collect();
+    let removed_files: Vec<String> = diff
+        .removed
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
+    let mut modules: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for path in &diff.added {
+        if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            modules.insert(dir.display().to_string());
+        }
+    }
+    let mut modules_added: Vec<String> = modules.into_iter().collect();
+    modules_added.sort();
+
+    Ok(Some(ArchDiff {
+        from: format!(
+            "{} ({})",
+            from.id.to_string().chars().take(7).collect::<String>(),
+            ts(from.author.time)
+        ),
+        to: format!(
+            "{} ({})",
+            head.id.to_string().chars().take(7).collect::<String>(),
+            ts(head.author.time)
+        ),
+        added: diff.added.len(),
+        removed: diff.removed.len(),
+        modified: diff.modified.len(),
+        added_files,
+        removed_files,
+        modules_added,
+    }))
+}
+
+fn snapshot_from_tree(
+    repo: &gitx_git::Repository,
+    tree_id: gitx_git::models::ObjectId,
+    label: &str,
+) -> anyhow::Result<gitx_graph::snapshot::DirectorySnapshot> {
+    let mut snapshot = gitx_graph::snapshot::DirectorySnapshot::new(
+        std::path::PathBuf::from(label),
+        Some(label.to_string()),
+    );
+    for (path, oid) in repo.tree_entries(tree_id)? {
+        snapshot.add_file(gitx_graph::snapshot::FileMetadata {
+            path,
+            size: 0,
+            modified: std::time::SystemTime::UNIX_EPOCH,
+            hash: oid.to_string(),
+        });
+    }
+    Ok(snapshot)
 }
 
 /// Statistics for the Overview panel: prefer a fresh persisted index, fall
@@ -774,36 +1047,89 @@ fn render_commit_detail(repo: &gitx_git::Repository, oid: &str) -> Vec<String> {
     out
 }
 
-/// Render a file's history: every commit that touched it (mirrors
-/// `gitx history <path>`).
+/// Render a file's lineage (docs/10 file archaeology, docs/08 File view):
+/// creation commit, first/last change, every rename event, and each commit
+/// that touched it — following renames backward from HEAD. Mirrors
+/// `gitx lineage <path>`.
 fn render_file_detail(repo: &gitx_git::Repository, path: &std::path::Path) -> Vec<String> {
+    use gitx_history::lineage::{FileAction, FileLineageNode};
+
     let service = gitx_history::timeline::HistoryService::new(repo);
-    let commits = match service.timeline(gitx_history::timeline::TimelineOptions {
-        max_count: Some(200),
-        from: None,
-        path: Some(path.to_path_buf()),
-        author: None,
-        since: None,
-        until: None,
-    }) {
-        Ok(c) => c,
-        Err(e) => return vec![format!("cannot read history for {}: {e}", path.display())],
+    let lineage = match service.get_file_lineage(path.to_path_buf(), None) {
+        Ok(l) => l,
+        Err(e) => return vec![format!("cannot trace lineage of {}: {e}", path.display())],
     };
-    let mut out = vec![format!("History of {}", path.display())];
-    if commits.is_empty() {
+    let mut out = vec![format!("Lineage of {}", path.display())];
+    if lineage.history.is_empty() {
         out.push("  (no commits touch this path)".to_string());
         return out;
     }
-    for commit in &commits {
-        out.push(format!(
-            "{}  {}  {}  {}",
-            short(&commit.id),
-            ts(commit.author.time),
-            commit.author.name,
-            one_line(&commit.message)
-        ));
+
+    // First (creation) and last (most recent) nodes, newest-first list.
+    let first = lineage.history.last().unwrap();
+    let last = lineage.history.first().unwrap();
+    out.push(format!(
+        "  Created by {} on {} — last change by {} on {}",
+        author_of(repo, &first.commit_id),
+        ts(commit_time(repo, &first.commit_id)),
+        author_of(repo, &last.commit_id),
+        ts(commit_time(repo, &last.commit_id))
+    ));
+    out.push(format!(
+        "  {} commit(s) in the file's life{}",
+        lineage.history.len(),
+        if lineage.history.len() > 1 {
+            " (newest first)".to_string()
+        } else {
+            String::new()
+        }
+    ));
+    out.push(String::new());
+
+    let badge = |action: &FileAction| -> &'static str {
+        match action {
+            FileAction::Added => "ADDED   ",
+            FileAction::Modified => "MODIFIED",
+            FileAction::Deleted => "DELETED ",
+            FileAction::Renamed { .. } => "RENAMED ",
+        }
+    };
+    let describe = |n: &FileLineageNode| -> String {
+        match &n.action {
+            FileAction::Renamed { from } => format!(
+                "{}  {}  {}  renamed from {}",
+                badge(&n.action),
+                short(&n.commit_id),
+                ts(commit_time(repo, &n.commit_id)),
+                from.display()
+            ),
+            _ => format!(
+                "{}  {}  {}  {}",
+                badge(&n.action),
+                short(&n.commit_id),
+                ts(commit_time(repo, &n.commit_id)),
+                one_line(&commit_message(repo, &n.commit_id))
+            ),
+        }
+    };
+    for node in &lineage.history {
+        out.push(format!("  {}", describe(node)));
     }
     out
+}
+
+fn commit_time(repo: &gitx_git::Repository, id: &gitx_git::models::ObjectId) -> i64 {
+    repo.find_commit(*id).map(|c| c.author.time).unwrap_or(0)
+}
+
+fn commit_message(repo: &gitx_git::Repository, id: &gitx_git::models::ObjectId) -> String {
+    repo.find_commit(*id).map(|c| c.message).unwrap_or_default()
+}
+
+fn author_of(repo: &gitx_git::Repository, id: &gitx_git::models::ObjectId) -> String {
+    repo.find_commit(*id)
+        .map(|c| c.author.name)
+        .unwrap_or_else(|_| "-".into())
 }
 
 fn ts(seconds: i64) -> String {

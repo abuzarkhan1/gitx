@@ -1,6 +1,11 @@
-use crate::views::common;
+use crate::views::{common, theme};
 use gitx_analysis::RepoAnalysis;
-use ratatui::{Frame, layout::Rect};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Modifier, Style},
+    text::{Line, Span},
+};
 
 pub fn render(
     f: &mut Frame,
@@ -9,9 +14,9 @@ pub fn render(
     scroll: usize,
     selected: usize,
 ) -> usize {
-    let rows: Vec<String> = match analysis {
-        None => vec!["No repository loaded.".to_string()],
-        Some(a) if a.files.is_empty() => vec!["No files analyzed.".to_string()],
+    let rows: Vec<Line<'static>> = match analysis {
+        None => common::empty_rows("repository"),
+        Some(a) if a.files.is_empty() => vec![theme::plain("No files analyzed.")],
         Some(a) => {
             let mut files: Vec<&gitx_analysis::FileAnalysis> = a.files.iter().collect();
             files.sort_by(|x, y| {
@@ -21,23 +26,38 @@ pub fn render(
             });
             let mut out = Vec::new();
             for file in &files {
-                out.push(format!(
-                    "⚠ {:.0}/100  {}  {}",
-                    file.risk,
-                    file.classification,
-                    file.path.display()
-                ));
-                out.push(format!(
-                    "     changes {} | churn 30d {} | fixes {} | contributors {} | ownership {:.0}%",
+                let color = theme::severity_color(file.risk);
+                let class_color = theme::class_color(file.classification);
+                out.push(Line::from(vec![
+                    Span::styled("⚠", Style::default().fg(color)),
+                    Span::styled(
+                        format!(" {:.0}/100  ", file.risk),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!("{:<7}  ", file.classification),
+                        Style::default().fg(class_color),
+                    ),
+                    Span::raw(file.path.display().to_string()),
+                ]));
+                out.push(theme::dim(format!(
+                    "         changes {} | churn 30d {} | fixes {} | contributors {} | ownership {:.0}%",
                     file.metrics.change_frequency,
                     file.metrics.lines_added + file.metrics.lines_deleted,
                     file.metrics.bug_fix_count,
                     file.metrics.unique_contributors,
                     file.ownership_concentration
-                ));
+                )));
             }
             out
         }
     };
-    common::render_scrollable(f, area, " Risk (evidence-backed) ", &rows, scroll, selected)
+    common::render_scrollable(
+        f,
+        area,
+        " Risk — evidence-backed maintenance risk (0–100) ",
+        &rows,
+        scroll,
+        selected,
+    )
 }

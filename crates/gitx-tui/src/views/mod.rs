@@ -1,3 +1,4 @@
+pub mod architecture;
 pub mod branches;
 pub mod commits;
 pub mod common;
@@ -12,4 +13,5 @@ pub mod ownership;
 pub mod recovery;
 pub mod risk;
 pub mod search;
+pub mod theme;
 pub mod timeline;

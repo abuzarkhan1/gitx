@@ -18,7 +18,7 @@ audit. Legend:
 | 05-DOMAIN-MODEL | ✅ | Entities present; identity normalization + config user-mapping (docs/05 §3) implemented and applied in `gitx contributors` |
 | 06-DATABASE-SCHEMA | ✅ | v1–v3 migrations: all documented tables incl. FTS5 + corrected triggers |
 | 07-CLI-SPECIFICATION | ✅ | Full surface + JSON + completions + exit codes 1–7; `release <TAG>`, `architecture --from/--to`, `search --since/--code`, blame `--limit` (docs/07 updated) |
-| 08-TUI-SPECIFICATION | ✅ | All 14 views + drill-down + help overlay + `r`/`?` + activity chart + health evidence + small-terminal guard + background loading; commit view now shows parent glyphs + affected areas, file view hotspot/class/churn, contributors weight+dates+files, architecture module table; FTS search across commits/files/authors/branches/tags |
+| 08-TUI-SPECIFICATION | ✅ | All 14 views + drill-down + help overlay + `r`/`?` + small-terminal guard + background loading + **polish pass**: Overview charts (activity bar chart, language bars, health gauges, contributor bars, hotspot bars, repo-size gauge), full color hierarchy (severity/health/recency/diff colors, high-contrast selection, themed header+breadcrumb), plain-language explanations per metric + health verdict, consistent empty states, mouse support (wheel + sidebar click), view-jump keys (o/t/c/b/f/u/s/w/a/d/x/e/v, 1–9), sortable Hotspots (`s`), async FTS search with cursor + pending state, commit-graph timeline, ahead/behind bars, ownership bars, scroll-position indicator, `GITX_THEME`/`[ui] theme` |
 | 09-INDEXING-ENGINE | ✅ | scan/refresh real; progress, Ctrl-C cancellation, atomic rebuild, corruption detection (exit 5), tag/reflog upsert, rewritten-history detection (HEAD-ref tracked, warning + meta flag) |
 | 10-ANALYSIS-ENGINE | ✅ | + branch intelligence (ahead/behind/age/shared/merge-complexity), subsystem + knowledge + inactive ownership, release depth, risk/health formula+window, dependency usage + churn (`gitx dependencies usage`) |
 | 11-SEARCH-SPECIFICATION | 🟡 | FTS5 + filters + JSON + `--since`/`--author` + `--code` + **TUI search now queries FTS across all scopes** (via `SearchService`); ranking is bm25-only |
@@ -349,6 +349,103 @@ clippy `-D warnings` clean, `cargo fmt` clean, `scripts/check.sh` green.
   symlinks; every other scan reads Git trees and never touches the
   worktree).
 
+## Fourth implementation pass (TUI usability + visuals, all verified)
+
+Closed the TUI polish list (charts, colors, explanations, navigation, spec
+markers, general polish) in five workstreams; **83 tests pass**, clippy
+`-D warnings` clean, `cargo fmt` clean, `scripts/check.sh` green. Each
+workstream was smoke-tested through a real PTY (alternate screen, keys sent,
+frames captured and inspected).
+
+- **Charts & visualizations (docs/08 §3 Overview)** — new `theme` module
+  provides horizontal bars (`hbar`), vertical bar charts with week labels
+  (`vchart`), and severity/health/recency colors. The Overview now renders:
+  a real activity bar chart (12 weekly buckets with a label row), a
+  language-breakdown bar list, six health gauges + overall gauge, top
+  hotspots with score bars, a contributors-share bar list, and a
+  repository-size gauge (small/medium/large). No bare numbers without a bar
+  or context.
+- **Color hierarchy (docs/25, docs/10 §2 bands)** — risk/hotspot scores
+  are red/yellow/blue/green by band; classifications get badge colors;
+  health sub-scores green/yellow/red; branch staleness green/yellow/red;
+  commit-detail diff lines +green/−red; high-contrast selection
+  (`sel_bg`); themed header with accent-colored branding, branch, state,
+  and a “▸ current view” breadcrumb.
+- **Explanations (docs/25 evidence-first)** — every Overview metric carries
+  a one-line plain-language explanation; the Health view adds a verdict
+  line (“mostly healthy — a few files may need attention”); every view
+  shows a descriptive title (“Files — ranked by maintenance risk (0–100)”)
+  and consistent empty states (“Run: gitx refresh …”) via `common::empty_rows`.
+- **Navigation & discoverability (docs/08 #17/#18/#19/#20)** — mouse
+  support enabled (scroll wheel scrolls lists; left-click on the sidebar
+  jumps to a view); view-jump keys `o/t/c/b/f/u/s/w/a/d/x/e/v` and `1–9`;
+  the Hotspots view is sortable (`s` cycles score/changes/churn); the FTS
+  search runs on a worker thread with a visible cursor and a “Searching…”
+  pending state (the UI never freezes); contextual status-bar hints per
+  view plus a scroll-position indicator (“row x of N”).
+- **Spec markers + polish (docs/08 #10/#14/#15, docs/16 §[ui])** — the
+  Timeline renders a commit graph (lane glyphs `•`/`*`/`o` with
+  `│` continuations); branches show ahead/behind bars; ownership shows
+  per-file concentration bars; contributors show contribution-weight bars;
+  loading shows progress in the status bar; themes are configurable via
+  `GITX_THEME` or `[ui] theme` (default + light).
+- **Drill-down depth (docs/08 #23, docs/10 §10)** — the Commits view adds a
+  **related-commits panel**: selecting a commit lists up to three other
+  commits touching overlapping files, ranked by shared-file count (computed
+  from per-commit changed-file sets at load time); the Architecture view
+  gains a **structural before/after comparison** — HEAD vs the newest
+  commit ≥30 days old (falling back to the oldest), diffed with
+  `gitx_graph::compare::compare_snapshots` — showing files added/removed/
+  modified, added files, removed files, and modules (directories) that
+  gained files; the file drill-down is upgraded from a plain history list
+  to **rename-following lineage** — “Created by … on … — last change by …
+  on …”, a per-action badge list (ADDED/MODIFIED/RENAMED from…/DELETED)
+  with commit ids, dates, and messages (closes docs/08 §3 File view).
+
+## Fifth implementation pass (headless PTY verification, all green)
+
+Re-verified every polish item end-to-end by **driving the real TUI in a
+tmux PTY** (alternate screen, keys + mouse SGR sequences sent, frames
+captured and grepped — `scripts/verify-tui.sh`, 39 checks). This pass fixed
+what the automated harness caught; **83 tests pass**, clippy `-D warnings`
+clean, `cargo fmt` clean.
+
+- **Cursor navigation (docs/08 #20)** — j/k now move the *selection* (`selected`),
+  with the window scrolling only when the cursor leaves the visible area;
+  Enter drills into the row under the cursor (previously the highlight and
+  Enter were stuck on row 0 and j/k only scrolled). Verified: cursor
+  highlight moves, Enter opens the exact commit under it, mouse wheel moves
+  the cursor too, and the Health evidence panel follows the selected
+  sub-score.
+- **Loading spinner rendered** — `load_frame` was advanced on every tick but
+  never drawn; the status bar now shows an animated `⣾⣽⣻⢿⡿⣟⣯⣷`
+  spinner while the background loader or an FTS search runs.
+- **First-run onboarding hint (docs/08 #31)** — the tracked-but-unused
+  `nav_used` flag now drives a "Getting started — ↑↓ navigate · Enter open a
+  view · / search · ? help" banner in the Overview that disappears after
+  first navigation.
+- **Repo-size gauge** — the linear 0–5000-file scale rendered small repos at
+  ~0%; it now uses a log scale so small/medium/large all get a meaningful
+  bar.
+- **High-contrast selection** — the default theme's selection background
+  changed from `DarkGray` (too subtle in long lists) to blue.
+- **Ctrl+C always quits** — the `Ctrl-C` arm sat *after* the generic
+  view-jump `Char(c)` arm, so Ctrl+C in navigation mode opened the Commits
+  view instead of quitting; it is now handled first (and also during search
+  input).
+- **Contributor areas bug** — the Contributors view's files-touched and
+  top-areas lookup matched on the raw author name, but the analysis keys
+  `author_lines` by `Name <email>` (docs/05 identity normalization); the
+  lookup now uses the full identity, so areas render for live analysis.
+- **Scroll-position indicator** — upgraded from "row x of N" to a
+  "showing a–b of N" range derived from the scroll offset and terminal
+  height.
+- **`scripts/verify-tui.sh`** — headless harness: builds a fixture repo,
+  starts `gitx-tui` in tmux, drives every view via keys + mouse SGR
+  sequences, captures frames, and asserts all 39 polish markers (charts,
+  gauges, colors via 256-color escapes, hints, ranges, related-commits,
+  lineage, sort, themes, Ctrl+C).
+
 ## Remaining gaps — complete line-by-line audit (docs ⇄ code)
 
 Re-audited every doc word-by-word against the workspace. Items below are
@@ -359,7 +456,10 @@ doc marks them MVP (P0/P1) or later (V1/V2/Later).
 
 Items marked **[closed]** were completed in the implementation passes below
 (the first pass covered docs/07–08/10/09/12/14/15/16; the second pass covered
-docs/13/05/03/12/18/14/25/08; the third pass covered docs/13/23/04/08/11/14/15).
+docs/13/05/03/12/18/14/25/08; the third pass covered docs/13/23/04/08/11/14/15;
+the fourth pass covered the TUI usability/visual list — charts, colors,
+explanations, mouse, quick keys, async search, themes, related-commits,
+architecture before/after).
 
 1. **[closed]** docs/03 §11, docs/22 §5 — Structured logging: `tracing` is
    wired end-to-end (`RUST_LOG` or `--verbose`, stderr only) with real log
@@ -384,12 +484,13 @@ docs/13/05/03/12/18/14/25/08; the third pass covered docs/13/23/04/08/11/14/15).
    into `gitx branches` and `gitx branch`.
 9. **[closed]** docs/08 §3 — Overview now shows activity chart, top
    hotspots, recent commits, state, live branch/name header.
-10. **docs/08 §3 — Commit view.** *Partial:* parent-graph glyphs and
-    affected areas are now shown; the related-commits panel (commits
-    touching the same files) is still missing.
-11. **docs/08 §3 — File view.** *Partial:* hotspot score, classification,
-    churn, author count, and ownership % are now shown; lineage,
-    first/last-change dates, and rename events are still missing.
+10. **[closed]** docs/08 §3 — Commit view: parent-graph glyphs, affected
+    areas, and a related-commits panel (commits touching overlapping files,
+    ranked by shared-file count) are now shown.
+11. **[closed]** docs/08 §3 — File view: hotspot score, classification,
+    churn, author count, and ownership % are shown in the list; the file
+    drill-down (Enter) shows rename-following lineage with
+    creation/last-change authors + dates and rename events.
 12. **[closed]** docs/08 §3 — Branch view shows age + last activity per
     branch.
 13. **[closed]** docs/08 §3 — Contributors view now shows contribution
@@ -465,9 +566,10 @@ docs/13/05/03/12/18/14/25/08; the third pass covered docs/13/23/04/08/11/14/15).
 42. **[closed]** docs/18 §7 — Newer-index detection: opening a newer-schema
     index is detected, explained, and exits 5 instead of being silently
     trusted.
-43. **docs/08 §3 Architecture — TUI graph/table.** *Partial:* the panel now
-    shows a module table (file count, churn, modules added in the last 90
-    days); a structural before/after graph comparison is still missing.
+43. **[closed]** docs/08 §3 Architecture — TUI graph/table: the panel shows
+    a module table (file count, churn, modules added in the last 90 days)
+    **and** a structural before/after comparison (HEAD vs the newest commit
+    ≥30 days old) with files added/removed/modified and modules gained.
 44. **[closed]** docs/04 §9 — Degraded states: Indexed/PartiallyIndexed/
     Failed/Unsupported model surfaced in `gitx status` and `gitx info` with
     remediation hints.
@@ -476,29 +578,48 @@ docs/13/05/03/12/18/14/25/08; the third pass covered docs/13/23/04/08/11/14/15).
 46. **docs/02 §4 V1 — Advanced filters / richer metrics.** *Partial:*
     filters exist for timeline/search and subsystem ownership is live
     (docs/10 §4); direct/indirect dependency classification and architecture
-    milestones remain (see items 48, 49).
+    milestones remain (see items 53, 54).
 47. **[closed]** docs/25 §8 — Long output: `timeline` and `reflog` page
     through `less -R` on a TTY; non-TTY output prints directly.
+48. **[closed]** docs/08 §3 Overview — Charts: activity bar chart with week
+    labels, language bars, six health gauges + overall, top-hotspot score
+    bars, contributor-share bars, and a repository-size gauge; every metric
+    has a plain-language explanation and the health view adds a verdict.
+49. **[closed]** docs/08, docs/25, docs/10 §2 — Colors: severity band
+    colors (red/yellow/blue/green), classification badges, health
+    green/yellow/red, staleness recency colors, +green/−red diff lines in
+    the commit detail, high-contrast selection, and a themed header with a
+    “▸ current view” breadcrumb.
+50. **[closed]** docs/08 #17/#18 — Mouse support (scroll wheel + sidebar
+    click) and view-jump keys (`o/t/c/b/f/u/s/w/a/d/x/e/v`, `1–9`); the
+    Hotspots table is sortable (`s` cycles score/changes/churn).
+51. **[closed]** docs/08 #20 — Async FTS search in the TUI: queries run on
+    a worker thread with a visible cursor and a “Searching…” pending state;
+    the status bar shows contextual hints and a scroll-position indicator.
+52. **[closed]** docs/08 #10/#14/#15, docs/16 §[ui] — Timeline commit
+    graph (`•`/`*`/`o` with `│` lanes), branch ahead/behind bars, ownership
+    concentration bars, contributor-weight bars, and configurable themes
+    (`GITX_THEME` / `[ui] theme`, default + light).
 
 ### Later / V1–V2 gaps (docs mark these as future work — listed for
 completeness, not defects)
 
-48. **docs/10 §10 — Architecture milestones and dependency-direction
+53. **docs/10 §10 — Architecture milestones and dependency-direction
     changes** are not detected (only added/removed/modified + new modules).
-49. **docs/10 §11 — Dependency depth:** usage (files referencing a dep) and
+54. **docs/10 §11 — Dependency depth:** usage (files referencing a dep) and
     change-churn are live via `gitx dependencies usage`; direct/indirect
     classification, cargo features, and pnpm catalogs remain unresolved.
-50. **docs/11 §8 — Ranking tiers.** bm25 relevance only; the exact >
+55. **docs/11 §8 — Ranking tiers.** bm25 relevance only; the exact >
     path/name > recent > textual priority tiers are not implemented
     (results are still deterministic).
-51. **docs/21 Stage 6, docs/02 V1/V2 — Language symbols, Tree-sitter,
+56. **docs/21 Stage 6, docs/02 V1/V2 — Language symbols, Tree-sitter,
     structural graphs.** `gitx-graph::treesitter` is a `DummyParser` stub
     (ADR-011 Proposed); `CodeGraph` exists but no command/TUI consumes it;
     symbol history and language-aware analysis are unimplemented.
-52. **docs/02 V2 — Advanced copy/rename lineage, richer export formats.**
-53. **docs/18 §9 — Installation docs** cover binary download, source build,
+57. **docs/02 V2 — Advanced copy/rename lineage, richer export formats.**
+58. **docs/18 §9 — Installation docs** cover binary download, source build,
     and completions; package-manager installation is still "later".
-54. **docs/13 §4/§8 — Large-diff memory streaming** (incremental diff
+59. **docs/13 §4/§8 — Large-diff memory streaming** (incremental diff
     materialization and bounded output for `gitx diff` on huge commits) and
     the sub-second-startup target for very large repositories.
 

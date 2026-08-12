@@ -1,14 +1,18 @@
+use crate::views::theme;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Style},
-    widgets::{Block, Borders, Paragraph},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListState, Paragraph},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
     query: &str,
+    pending: bool,
     results: Option<&[gitx_services::SearchHit]>,
     focused: bool,
     scroll: usize,
@@ -26,9 +30,22 @@ pub fn render(
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Query input row.
+    // Query input row with a visible blinking cursor (docs/08 #20).
     let input_area = Rect::new(inner.x, inner.y, inner.width, 1);
-    let input = Paragraph::new(format!("> {}", query));
+    let input = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "> ",
+            Style::default()
+                .fg(theme::global().accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(query.to_string()),
+        if focused {
+            Span::styled("▌", Style::default().fg(Color::White))
+        } else {
+            Span::raw(" ")
+        },
+    ]));
     f.render_widget(input, input_area);
 
     let results_area = Rect::new(
@@ -37,47 +54,69 @@ pub fn render(
         inner.width,
         inner.height.saturating_sub(2),
     );
-    let rows: Vec<String> = if query.trim().is_empty() {
+    let rows: Vec<Line<'static>> = if query.trim().is_empty() {
         vec![
-            "Type to search across commits, files, authors, branches and tags \
-             (SQLite FTS5 over the index)."
-                .to_string(),
+            theme::plain("Type to search across commits, files, authors, branches and tags"),
+            theme::dim("(SQLite FTS5 over the index — Enter opens the selected result.)"),
         ]
+    } else if pending {
+        vec![theme::dim("Searching the index…")]
     } else {
         match results {
-            None => vec!["Searching…".to_string()],
-            Some([]) => vec!["No results.".to_string()],
-            Some(list) => list
-                .iter()
-                .map(|hit| {
-                    let badge = match hit.scope.as_str() {
-                        "commit" => "commit ",
-                        "file" => "file   ",
-                        "author" => "author ",
-                        "branch" => "branch ",
-                        "tag" => "tag    ",
-                        _ => "       ",
+            None => vec![theme::dim("Type more to search…")],
+            Some([]) => vec![
+                theme::plain("No results."),
+                theme::dim("Try a shorter term, or run `gitx refresh` to rebuild the index."),
+            ],
+            Some(list) => {
+                let mut out = Vec::new();
+                for (i, hit) in list.iter().enumerate() {
+                    let (badge, color) = match hit.scope.as_str() {
+                        "commit" => ("commit ", Color::Cyan),
+                        "file" => ("file   ", Color::Green),
+                        "author" => ("author ", Color::Magenta),
+                        "branch" => ("branch ", Color::Yellow),
+                        "tag" => ("tag    ", Color::Blue),
+                        _ => ("       ", Color::DarkGray),
                     };
                     let detail = if hit.detail.is_empty() {
                         String::new()
                     } else {
                         format!("  ({})", hit.detail)
                     };
-                    format!("{badge} {}  {}{detail}", hit.id, hit.title)
-                })
-                .collect(),
+                    let line = Line::from(vec![
+                        Span::styled(
+                            badge,
+                            Style::default().fg(color).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(hit.id.clone()),
+                        Span::raw("  "),
+                        Span::styled(hit.title.clone(), Style::default().fg(Color::White)),
+                        Span::styled(detail, Style::default().fg(Color::DarkGray)),
+                    ]);
+                    let _ = i;
+                    out.push(line);
+                }
+                out
+            }
         }
     };
 
-    let mut text = String::new();
-    for (i, row) in rows.iter().enumerate() {
-        if i == selected && focused {
-            text.push_str(&format!("\u{1b}[7m{row}\u{1b}[0m\n"));
-        } else {
-            text.push_str(&format!("{row}\n"));
-        }
+    let total = rows.len();
+    let visible = results_area.height.saturating_sub(2) as usize;
+    let scroll = scroll.min(total.saturating_sub(visible));
+    let end = (scroll + visible).min(total);
+    let mut state = ListState::default();
+    if selected >= scroll && selected < end {
+        state.select(Some(selected - scroll));
     }
-    let paragraph = Paragraph::new(text).scroll((scroll as u16, 0));
-    f.render_widget(paragraph, results_area);
-    rows.len()
+    let list = List::new(rows[scroll..end].to_vec())
+        .highlight_style(
+            Style::default()
+                .bg(theme::global().sel_bg)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+    f.render_stateful_widget(list, results_area, &mut state);
+    total
 }
