@@ -13,6 +13,8 @@ exposes the raw Git signals behind it.
 
 ![gitx dashboard](docs/assets/gitx-dashboard.png)
 
+*The interactive dashboard — health, activity, hotspots, ownership, architecture, dependencies, and recovery.*
+
 ## Quick start
 
 ```bash
@@ -91,6 +93,10 @@ requirements, CLI and TUI specifications, the analysis engine, the database
 schema, the recovery model, and a docs ⇄ code audit matrix
 ([`docs/26-IMPLEMENTATION-STATUS.md`](docs/26-IMPLEMENTATION-STATUS.md)).
 
+![gitx architecture](docs/assets/gitx-architecture.png)
+
+*The 11-crate workspace — presentation → application services → domain engine → storage → git. Editable source: [`docs/assets/gitx-architecture.excalidraw`](docs/assets/gitx-architecture.excalidraw).*
+
 ## Development
 
 ```bash
@@ -99,6 +105,7 @@ scripts/check.sh            # fmt + clippy -D warnings + tests
 scripts/verify-tui.sh       # headless PTY verification of the dashboard
 scripts/bench.sh            # criterion baselines → benches/RESULTS.md
 scripts/ansi-to-png.py      # regenerate docs/assets/gitx-dashboard.png from a capture
+scripts/render-excalidraw-to-png.py  # regenerate docs/assets/gitx-architecture.png from the .excalidraw
 ```
 
 See [`docs/22-CONTRIBUTING.md`](docs/22-CONTRIBUTING.md) and

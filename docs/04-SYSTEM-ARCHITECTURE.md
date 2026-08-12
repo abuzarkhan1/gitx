@@ -15,6 +15,10 @@ No TUI component should directly traverse Git objects.
 
 ## 2. Logical architecture
 
+![GitX architecture](assets/gitx-architecture.png)
+
+*The crate layout — presentation → application services → domain engine → storage → git. Editable source: [`assets/gitx-architecture.excalidraw`](assets/gitx-architecture.excalidraw) (open at excalidraw.com or with the Excalidraw VS Code extension).*
+
 ```text
 CLI/TUI
    |
