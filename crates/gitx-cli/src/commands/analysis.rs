@@ -66,6 +66,28 @@ pub fn contributors(cli: &Cli) -> anyhow::Result<()> {
                 .collect::<Vec<_>>()
         ));
     }
+    if cli.csv {
+        let headers = [
+            "key",
+            "author",
+            "commits",
+            "first_activity",
+            "last_activity",
+        ];
+        let rows: Vec<Vec<String>> = list
+            .iter()
+            .map(|(key, name, commits, first, last)| {
+                vec![
+                    key.clone(),
+                    name.clone(),
+                    commits.to_string(),
+                    format_ts(*first),
+                    format_ts(*last),
+                ]
+            })
+            .collect();
+        return crate::commands::emit_csv(cli, &headers, &rows);
+    }
 
     println!("Contributors");
     for (key, name, commits, first, last) in list {
@@ -161,6 +183,35 @@ pub fn ownership(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
                 })
             })
             .collect::<Vec<_>>()));
+    }
+    if cli.csv {
+        let headers = [
+            "file",
+            "ownership_concentration",
+            "contributors",
+            "top_author",
+            "author_lines",
+        ];
+        let rows: Vec<Vec<String>> = files
+            .iter()
+            .take(50)
+            .map(|f| {
+                let mut owners: Vec<(String, u64)> = f.author_lines.clone().into_iter().collect();
+                owners.sort_by_key(|(_, lines)| std::cmp::Reverse(*lines));
+                vec![
+                    f.path.display().to_string(),
+                    format!("{:.1}", f.ownership_concentration),
+                    f.metrics.unique_contributors.to_string(),
+                    owners.first().map(|(a, _)| a.clone()).unwrap_or_default(),
+                    owners
+                        .iter()
+                        .map(|(a, l)| format!("{a}:{l}"))
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                ]
+            })
+            .collect();
+        return crate::commands::emit_csv(cli, &headers, &rows);
     }
 
     println!("Ownership concentration (highest first)");
@@ -285,6 +336,34 @@ pub fn hotspots(cli: &Cli, limit: usize, path: Option<&str>) -> anyhow::Result<(
             "hotspots": files.iter().map(|f| file_json(f)).collect::<Vec<_>>(),
         }));
     }
+    if cli.csv {
+        let headers = [
+            "file",
+            "hotspot_score",
+            "classification",
+            "changes",
+            "churn_30d",
+            "bug_fixes",
+            "contributors",
+            "ownership_pct",
+        ];
+        let rows: Vec<Vec<String>> = files
+            .iter()
+            .map(|f| {
+                vec![
+                    f.path.display().to_string(),
+                    format!("{:.1}", f.hotspot),
+                    f.classification.to_string(),
+                    f.metrics.change_frequency.to_string(),
+                    (f.metrics.lines_added + f.metrics.lines_deleted).to_string(),
+                    f.metrics.bug_fix_count.to_string(),
+                    f.metrics.unique_contributors.to_string(),
+                    format!("{:.1}", f.ownership_concentration),
+                ]
+            })
+            .collect();
+        return crate::commands::emit_csv(cli, &headers, &rows);
+    }
 
     println!("Hotspots (change/maintenance risk, 0–100)");
     for f in &files {
@@ -336,6 +415,36 @@ pub fn risk(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
         return print_json(&json!(
             files.iter().map(|f| file_json(f)).collect::<Vec<_>>()
         ));
+    }
+    if cli.csv {
+        let headers = [
+            "file",
+            "risk_score",
+            "change_frequency",
+            "churn_30d",
+            "bug_fixes",
+            "contributors",
+            "ownership_pct",
+            "complexity_source",
+            "function_count",
+        ];
+        let rows: Vec<Vec<String>> = files
+            .iter()
+            .map(|f| {
+                vec![
+                    f.path.display().to_string(),
+                    format!("{:.1}", f.risk),
+                    f.metrics.change_frequency.to_string(),
+                    (f.metrics.lines_added + f.metrics.lines_deleted).to_string(),
+                    f.metrics.bug_fix_count.to_string(),
+                    f.metrics.unique_contributors.to_string(),
+                    format!("{:.1}", f.ownership_concentration),
+                    f.complexity_source.to_string(),
+                    f.fn_count.to_string(),
+                ]
+            })
+            .collect();
+        return crate::commands::emit_csv(cli, &headers, &rows);
     }
 
     // Docs/10 §3 + §13: risk output must show evidence and its formula and
@@ -390,6 +499,49 @@ pub fn health(cli: &Cli) -> anyhow::Result<()> {
                 "duration_ms": analysis.analysis_duration_ms,
             }
         }));
+    }
+    if cli.csv {
+        let headers = ["metric", "value"];
+        let rows = vec![
+            vec!["overall".into(), format!("{:.1}", h.overall_score)],
+            vec![
+                "code_hotspots".into(),
+                format!("{:.1}", h.code_hotspots_score),
+            ],
+            vec![
+                "ownership_risk".into(),
+                format!("{:.1}", h.ownership_risk_score),
+            ],
+            vec![
+                "branch_hygiene".into(),
+                format!("{:.1}", h.branch_hygiene_score),
+            ],
+            vec![
+                "change_volatility".into(),
+                format!("{:.1}", h.change_volatility_score),
+            ],
+            vec![
+                "architecture_stability".into(),
+                format!("{:.1}", h.architecture_stability_score),
+            ],
+            vec![
+                "recovery_risk".into(),
+                format!("{:.1}", h.recovery_risk_score),
+            ],
+            vec![
+                "evidence.commits".into(),
+                analysis.total_commits.to_string(),
+            ],
+            vec![
+                "evidence.contributors".into(),
+                analysis.total_contributors.to_string(),
+            ],
+            vec![
+                "evidence.current_files".into(),
+                analysis.current_files.to_string(),
+            ],
+        ];
+        return crate::commands::emit_csv(cli, &headers, &rows);
     }
 
     println!("Repository Health  (composite, deterministic — docs/10 §8)");

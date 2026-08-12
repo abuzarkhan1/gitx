@@ -60,6 +60,27 @@ pub fn timeline(
                 .collect::<Vec<_>>()
         ));
     }
+    if cli.csv {
+        let headers = ["oid", "author", "email", "time", "message", "parents"];
+        let rows: Vec<Vec<String>> = commits
+            .iter()
+            .map(|c| {
+                vec![
+                    c.id.to_string(),
+                    c.author.name.clone(),
+                    c.author.email.clone(),
+                    c.author.time.to_string(),
+                    c.message.clone(),
+                    c.parents
+                        .iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ]
+            })
+            .collect();
+        return crate::commands::emit_csv(cli, &headers, &rows);
+    }
 
     let lines: Vec<String> = commits
         .iter()
@@ -504,7 +525,7 @@ pub fn branches(cli: &Cli) -> anyhow::Result<()> {
             "last_activity": activity,
         }));
 
-        if !cli.json {
+        if !cli.json && !cli.csv {
             let mark = if branch.is_remote {
                 "[remote]"
             } else {
@@ -526,6 +547,46 @@ pub fn branches(cli: &Cli) -> anyhow::Result<()> {
     }
     if cli.json {
         return print_json(&json!(rows));
+    }
+    if cli.csv {
+        let headers = [
+            "name",
+            "tip",
+            "is_remote",
+            "ahead",
+            "behind",
+            "age_days",
+            "is_stale",
+            "last_activity",
+        ];
+        let csv_rows: Vec<Vec<String>> = branches
+            .iter()
+            .map(|branch| {
+                let base = default_name
+                    .as_deref()
+                    .and_then(|d| branches.iter().find(|b| b.name == d));
+                let intelligence = gitx_analysis::branch::branch_intelligence(&repo, branch, base)
+                    .ok()
+                    .flatten();
+                let (ahead, behind, age_days, is_stale) = intelligence
+                    .as_ref()
+                    .map(|i| (i.ahead, i.behind, i.branch_age_days, i.is_stale))
+                    .unwrap_or((0, 0, 0, false));
+                vec![
+                    branch.name.clone(),
+                    branch.target.to_string(),
+                    branch.is_remote.to_string(),
+                    ahead.to_string(),
+                    behind.to_string(),
+                    age_days.to_string(),
+                    is_stale.to_string(),
+                    repo.find_commit(branch.target)
+                        .map(|c| format_ts(c.author.time))
+                        .unwrap_or_else(|_| "?".into()),
+                ]
+            })
+            .collect();
+        return crate::commands::emit_csv(cli, &headers, &csv_rows);
     }
     Ok(())
 }

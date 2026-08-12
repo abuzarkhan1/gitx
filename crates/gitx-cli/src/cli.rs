@@ -17,6 +17,11 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Emit CSV on stdout (tabular analytical commands; docs/02 V2 richer
+    /// export formats). Overrides `--json`.
+    #[arg(long, global = true)]
+    pub csv: bool,
+
     /// Disable ANSI colors in human output.
     #[arg(long, global = true)]
     pub no_color: bool,

@@ -183,6 +183,17 @@ pub fn print_json(value: &serde_json::Value) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Emit tabular rows as CSV (docs/02 V2 richer export formats). Callers
+/// build `headers` + `rows` and return early when `cli.csv` is set.
+pub fn emit_csv(cli: &Cli, headers: &[&str], rows: &[Vec<String>]) -> anyhow::Result<()> {
+    if !cli.csv {
+        anyhow::bail!("internal: emit_csv called without --csv");
+    }
+    let headers: Vec<String> = headers.iter().map(|h| h.to_string()).collect();
+    print!("{}", gitx_core::csv::write_csv(&headers, rows));
+    Ok(())
+}
+
 /// Long-output pagination (docs/25): when stdout is a terminal and more than
 /// 40 rows are being printed, pipe through `less -R` so output is paged like
 /// `git log`. Non-TTY stdout (scripts, CI, pipes) and short outputs print
