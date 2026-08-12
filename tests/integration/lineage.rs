@@ -51,3 +51,58 @@ fn lineage_follows_rename_backward() {
         "second node should be the original add"
     );
 }
+
+#[test]
+fn copied_change_reports_copy_source() {
+    let Some(repo) = FixtureRepo::new("lineage-copy") else {
+        eprintln!("skipping: git CLI unavailable");
+        return;
+    };
+    repo.write("src/util.rs", "pub fn helper() {}\n");
+    repo.commit("feat: util");
+    repo.write("src/copy.rs", "pub fn helper() {}\n");
+    repo.commit("feat: copy util");
+
+    let gix = Repository::discover(repo.path()).expect("open fixture");
+    let lineage = HistoryService::new(&gix)
+        .get_file_lineage(std::path::PathBuf::from("src/copy.rs"), None)
+        .expect("lineage");
+    let added = lineage
+        .history
+        .iter()
+        .find(|n| matches!(n.action, gitx_history::FileAction::Added { .. }))
+        .unwrap_or_else(|| panic!("copy.rs has an Added node, got {lineage:?}"));
+    match &added.action {
+        gitx_history::FileAction::Added { copy_of } => {
+            assert_eq!(
+                copy_of.as_deref(),
+                Some(std::path::Path::new("src/util.rs"))
+            )
+        }
+        other => panic!("expected Added with copy source, got {other:?}"),
+    }
+}
+
+#[test]
+fn merge_touch_is_marked_via_merge() {
+    let Some(repo) = FixtureRepo::new("lineage-merge") else {
+        eprintln!("skipping: git CLI unavailable");
+        return;
+    };
+    repo.write("shared.txt", "v1\n");
+    repo.commit("feat: shared");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.write("shared.txt", "v1\nfeature\n");
+    repo.commit("feat: feature change");
+    repo.git(&["checkout", "-q", "main"]);
+    repo.git(&["merge", "-q", "--no-ff", "feature", "-m", "merge: feature"]);
+
+    let gix = Repository::discover(repo.path()).expect("open fixture");
+    let lineage = HistoryService::new(&gix)
+        .get_file_lineage(std::path::PathBuf::from("shared.txt"), None)
+        .expect("lineage");
+    assert!(
+        lineage.history.iter().any(|n| n.via_merge),
+        "the merge commit touching the file must be marked, got {lineage:?}"
+    );
+}

@@ -438,11 +438,13 @@ pub fn lineage(cli: &Cli, path: &str) -> anyhow::Result<()> {
                 format!("renamed from {}", from.display())
             }
         };
+        let merge = if node.via_merge { "  (merge)" } else { "" };
         println!(
-            "  {}  {}  {}",
+            "  {}  {}  {}{}",
             short_oid(&node.commit_id),
             format_ts(repo.find_commit(node.commit_id)?.author.time),
-            action
+            action,
+            merge
         );
     }
     Ok(())

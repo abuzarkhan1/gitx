@@ -11,6 +11,9 @@ pub struct FileLineageNode {
     /// going forward in time).
     pub path: PathBuf,
     pub action: FileAction,
+    /// True when the change came in via a merge commit (2+ parents) on the
+    /// mainline walk (docs/02 V2 advanced lineage).
+    pub via_merge: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +63,7 @@ impl HistoryService<'_> {
         for commit_id_res in self.repo.rev_walk(head_id)? {
             let commit_id = commit_id_res?;
             let commit = self.repo.find_commit(commit_id)?;
+            let via_merge = commit.parents.len() > 1;
 
             // Root commit: the file exists in this tree → Added (its birth),
             // possibly copied from an existing file with identical content.
@@ -71,6 +75,7 @@ impl HistoryService<'_> {
                         action: FileAction::Added {
                             copy_of: copy_source(self.repo, commit.tree_id, &current),
                         },
+                        via_merge,
                     });
                 }
                 break;
@@ -91,19 +96,30 @@ impl HistoryService<'_> {
             let mut renamed = false;
             for change in touched {
                 match change.change_type {
-                    gitx_git::models::ChangeType::Renamed
-                    | gitx_git::models::ChangeType::Copied
-                        if change.path == current =>
-                    {
+                    gitx_git::models::ChangeType::Renamed if change.path == current => {
                         if let Some(from) = &change.old_path {
                             history.push(FileLineageNode {
                                 commit_id,
                                 path: current.clone(),
                                 action: FileAction::Renamed { from: from.clone() },
+                                via_merge,
                             });
                             current = from.clone();
                             renamed = true;
                         }
+                    }
+                    // A copy (docs/02 V2): the copied file has its own life, so
+                    // the walk does not rewind `current` — record it as an
+                    // Added with the copy source and continue.
+                    gitx_git::models::ChangeType::Copied if change.path == current => {
+                        history.push(FileLineageNode {
+                            commit_id,
+                            path: current.clone(),
+                            action: FileAction::Added {
+                                copy_of: change.old_path.clone(),
+                            },
+                            via_merge,
+                        });
                     }
                     gitx_git::models::ChangeType::Added if change.path == current => {
                         history.push(FileLineageNode {
@@ -112,6 +128,7 @@ impl HistoryService<'_> {
                             action: FileAction::Added {
                                 copy_of: copy_source(self.repo, commit.tree_id, &current),
                             },
+                            via_merge,
                         });
                     }
                     gitx_git::models::ChangeType::Deleted if change.path == current => {
@@ -119,6 +136,7 @@ impl HistoryService<'_> {
                             commit_id,
                             path: current.clone(),
                             action: FileAction::Deleted,
+                            via_merge,
                         });
                     }
                     gitx_git::models::ChangeType::Modified if change.path == current => {
@@ -126,6 +144,7 @@ impl HistoryService<'_> {
                             commit_id,
                             path: current.clone(),
                             action: FileAction::Modified,
+                            via_merge,
                         });
                     }
                     _ => {}
