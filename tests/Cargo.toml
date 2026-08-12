@@ -67,3 +67,7 @@ path = "integration/diff.rs"
 [[test]]
 name = "graph"
 path = "integration/graph.rs"
+
+[[test]]
+name = "product"
+path = "integration/product.rs"

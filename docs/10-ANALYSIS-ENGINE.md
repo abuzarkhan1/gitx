@@ -193,7 +193,14 @@ Repository health is a composite, deterministic overview derived from measurable
 overall = weighted aggregation of six sub-scores
 ```
 
-Each sub-score is normalized to 0–100, uses the documented classification bands, and must carry its own evidence:
+Each sub-score is normalized to 0–100, uses the **health** classification bands (health is higher-is-better, so the labels run the opposite direction of the risk bands), and must carry its own evidence:
+
+```text
+0–30    POOR
+31–60   FAIR
+61–80   GOOD
+81–100  EXCELLENT
+```
 
 - **code hotspots** — distribution and severity of high-change/high-risk files
 - **ownership risk** — ownership concentration, knowledge concentration, inactive ownership

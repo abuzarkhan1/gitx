@@ -40,3 +40,42 @@ impl RepoHealth {
         }
     }
 }
+
+/// Health sub-score band labels (docs/10 §8): health scores are
+/// higher-is-better, so the labels run POOR → EXCELLENT — the opposite
+/// direction of the risk/hotspot bands. Shared by the CLI so the printed
+/// bands can never drift from the TUI's color mapping again.
+pub fn health_band(score: f64) -> &'static str {
+    if score <= 30.0 {
+        "POOR"
+    } else if score < 61.0 {
+        "FAIR"
+    } else if score < 81.0 {
+        "GOOD"
+    } else {
+        "EXCELLENT"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_band_partitions_0_100() {
+        assert_eq!(health_band(0.0), "POOR");
+        assert_eq!(health_band(29.9), "POOR");
+        assert_eq!(health_band(30.0), "POOR");
+        assert_eq!(health_band(60.9), "FAIR");
+        assert_eq!(health_band(61.0), "GOOD");
+        assert_eq!(health_band(80.9), "GOOD");
+        assert_eq!(health_band(81.0), "EXCELLENT");
+        assert_eq!(health_band(100.0), "EXCELLENT");
+    }
+
+    #[test]
+    fn health_band_never_uses_risk_labels() {
+        assert_ne!(health_band(95.0), "CRITICAL");
+        assert_ne!(health_band(50.0), "HIGH");
+    }
+}

@@ -544,7 +544,10 @@ pub fn health(cli: &Cli) -> anyhow::Result<()> {
         return crate::commands::emit_csv(cli, &headers, &rows);
     }
 
-    println!("Repository Health  (composite, deterministic — docs/10 §8)");
+    println!(
+        "Repository Health  (composite, deterministic — docs/10 §8)  band: {}",
+        gitx_analysis::health_band(h.overall_score)
+    );
     println!();
     println!(
         "  Code Hotspots          {:>5.0}/100",
@@ -582,10 +585,13 @@ pub fn health(cli: &Cli) -> anyhow::Result<()> {
         analysis.analysis_duration_ms
     );
     // Explainability contract (docs/10 §13): formula, time window, and the
-    // classification bands used for every sub-score.
+    // classification bands used for every sub-score. Health bands are
+    // health-oriented (higher = healthier) — never the risk CRITICAL labels.
     println!("  Formula: overall = Σ(weight_i × sub_score_i), each sub-score normalized 0–100");
     println!("  Time window: full history; churn/activity signals over the last 30 days");
-    println!("  Bands: 0–30 LOW · 31–60 MEDIUM · 61–80 HIGH · 81–100 CRITICAL");
+    println!(
+        "  Bands: 0–30 POOR · 31–60 FAIR · 61–80 GOOD · 81–100 EXCELLENT (higher = healthier)"
+    );
     Ok(())
 }
 

@@ -17,7 +17,7 @@ pub mod symbols;
 // Re-export common types
 pub use branch::{BranchIntelligence, analyze_branch};
 pub use classification::classify_commit_message;
-pub use health::RepoHealth;
+pub use health::{RepoHealth, health_band};
 pub use hotspots::{
     HotspotScore, HotspotWeights, calculate_hotspot_score, calculate_hotspot_score_with,
     calculate_risk_score,
