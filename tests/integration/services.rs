@@ -179,3 +179,67 @@ fn full_scan_equals_incremental_from_empty() {
     assert_eq!(branches_a, branches_b, "branch rows agree");
     let _ = std::fs::remove_file(&path_b);
 }
+
+#[test]
+fn search_until_and_path_scope_work() {
+    let Some(repo) = repo() else {
+        return;
+    };
+    let git = gitx_git::Repository::discover(repo.path()).unwrap();
+    let index = IndexService::new(&git);
+    index.scan(false).unwrap();
+
+    let service = SearchService::new(&git);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    // `until` a year ago must exclude the fresh fixture commits.
+    // "workspace" appears in the fixture's first commit message.
+    let hits = service
+        .search(
+            "\"workspace\"",
+            "workspace",
+            &SearchOptions {
+                commits: true,
+                until: Some(now - 86_400 * 365),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        hits.is_empty(),
+        "until filter must exclude fresh commits, got {hits:?}"
+    );
+
+    // Without the filter the same scope returns results.
+    let hits = service
+        .search(
+            "\"workspace\"",
+            "workspace",
+            &SearchOptions {
+                commits: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(!hits.is_empty(), "unfiltered commit scope should hit");
+
+    // `path` prefix restricts the file scope.
+    let hits = service
+        .search(
+            "\"README\"",
+            "README",
+            &SearchOptions {
+                files: true,
+                path: Some("nonexistent/".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        hits.is_empty(),
+        "path prefix must exclude everything, got {hits:?}"
+    );
+}

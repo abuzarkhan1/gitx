@@ -9,6 +9,8 @@ pub fn search(
     cli: &Cli,
     query: &str,
     since: Option<&str>,
+    until: Option<&str>,
+    path: Option<&str>,
     commits: bool,
     files: bool,
     authors: bool,
@@ -23,9 +25,12 @@ pub fn search(
 ) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
 
-    // `--since` is a commit-level filter; normalize it to unix seconds so the
-    // SQLite backend can compare directly (docs/11 §4).
+    // `--since`/`--until` are commit-level filters; normalize to unix seconds
+    // so the SQLite backend can compare directly (docs/11 §4).
     let since = since
+        .map(|s| crate::commands::parse_ts(s).map(|t| t.to_string()))
+        .transpose()?;
+    let until = until
         .map(|s| crate::commands::parse_ts(s).map(|t| t.to_string()))
         .transpose()?;
 
@@ -46,6 +51,8 @@ pub fn search(
         directories,
         since,
         author,
+        until,
+        path: path.map(|p| p.to_string()),
     };
 
     let search_query = SearchQuery::new(query).with_filters(filters);

@@ -12,6 +12,13 @@ pub struct TimelineOptions {
     pub since: Option<i64>,
     /// Only include commits at or before this unix timestamp.
     pub until: Option<i64>,
+    /// Only include commits whose committer name/email contains this
+    /// (docs/02 V1 advanced filters).
+    pub committer: Option<String>,
+    /// Only include merge commits (2+ parents).
+    pub merges_only: bool,
+    /// Exclude merge commits.
+    pub no_merges: bool,
 }
 
 pub struct HistoryService<'a> {
@@ -47,6 +54,19 @@ impl<'a> HistoryService<'a> {
                 if !name_matches && !email_matches {
                     continue;
                 }
+            }
+            if let Some(committer) = &options.committer {
+                let name_matches = commit.committer.name.contains(committer);
+                let email_matches = commit.committer.email.contains(committer);
+                if !name_matches && !email_matches {
+                    continue;
+                }
+            }
+            if options.merges_only && commit.parents.len() < 2 {
+                continue;
+            }
+            if options.no_merges && commit.parents.len() >= 2 {
+                continue;
             }
             if let Some(since) = options.since
                 && commit.author.time < since

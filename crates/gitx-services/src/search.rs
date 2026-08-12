@@ -12,6 +12,10 @@ pub struct SearchService<'a> {
 #[derive(Debug, Clone, Default)]
 pub struct SearchOptions {
     pub since: Option<i64>,
+    /// Only commits at or before this unix timestamp.
+    pub until: Option<i64>,
+    /// Restrict file/symbol/directory scopes to this path prefix.
+    pub path: Option<String>,
     pub commits: bool,
     pub files: bool,
     pub authors: bool,
@@ -63,22 +67,27 @@ impl<'a> SearchService<'a> {
 
         let mut hits = Vec::new();
 
-        // Commits (message + author). `--since` filtering is applied by the
-        // CLI layer before calling; the service matches across the whole index.
+        // Commits (message + author). since/until filters are applied here
+        // so both the CLI and the TUI get the same commit-scope semantics.
         if options.commits {
             let sql = "SELECT c.oid, c.message, COALESCE(a.name, '') FROM commits_fts f \
                        JOIN commits c ON c.rowid = f.rowid \
                        LEFT JOIN authors a ON a.id = c.author_id \
                        WHERE commits_fts MATCH ?1 \
+                         AND (?2 IS NULL OR c.timestamp >= ?2) \
+                         AND (?3 IS NULL OR c.timestamp <= ?3) \
                        ORDER BY c.timestamp DESC LIMIT 200";
             let mut stmt = conn.prepare(sql)?;
-            let rows = stmt.query_map(rusqlite::params![query], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?;
+            let rows = stmt.query_map(
+                rusqlite::params![query, options.since, options.until],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )?;
             for row in rows {
                 let (oid, message, author) = row?;
                 hits.push(SearchHit {
@@ -97,6 +106,11 @@ impl<'a> SearchService<'a> {
             let rows = stmt.query_map([query], |row| row.get::<_, String>(0))?;
             for path in rows {
                 let path = path?;
+                if let Some(prefix) = &options.path
+                    && !path.starts_with(prefix.as_str())
+                {
+                    continue;
+                }
                 hits.push(SearchHit {
                     scope: "file".into(),
                     id: path.clone(),
@@ -194,6 +208,11 @@ impl<'a> SearchService<'a> {
             })?;
             for row in rows {
                 let (name, kind, line, path) = row?;
+                if let Some(prefix) = &options.path
+                    && !path.starts_with(prefix.as_str())
+                {
+                    continue;
+                }
                 hits.push(SearchHit {
                     scope: "symbol".into(),
                     id: path.clone(),
@@ -214,6 +233,11 @@ impl<'a> SearchService<'a> {
             let mut dirs: Vec<String> = Vec::new();
             for path in rows {
                 let path = path?;
+                if let Some(prefix) = &options.path
+                    && !path.starts_with(prefix.as_str())
+                {
+                    continue;
+                }
                 let mut parent = std::path::Path::new(&path).parent();
                 while let Some(p) = parent {
                     let dir = p.display().to_string();

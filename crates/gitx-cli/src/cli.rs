@@ -74,6 +74,9 @@ pub enum Commands {
         /// Only commits whose author name/email contains this.
         #[arg(long)]
         author: Option<String>,
+        /// Only commits whose committer name/email contains this.
+        #[arg(long)]
+        committer: Option<String>,
         /// Only commits at or after this date (RFC3339 or unix seconds).
         #[arg(long)]
         since: Option<String>,
@@ -86,6 +89,12 @@ pub enum Commands {
         /// Only commits touching this path.
         #[arg(long)]
         path: Option<String>,
+        /// Only merge commits (2+ parents).
+        #[arg(long)]
+        merges: bool,
+        /// Exclude merge commits.
+        #[arg(long)]
+        no_merges: bool,
         /// Maximum number of commits to show.
         #[arg(long)]
         max: Option<usize>,
@@ -173,6 +182,12 @@ pub enum Commands {
         /// Only commits at or after this date (RFC3339 or unix seconds).
         #[arg(long)]
         since: Option<String>,
+        /// Only commits at or before this date (RFC3339 or unix seconds).
+        #[arg(long)]
+        until: Option<String>,
+        /// Restrict file/symbol/directory results to this path prefix.
+        #[arg(long)]
+        path: Option<String>,
         /// Search commit messages only.
         #[arg(long)]
         commits: bool,

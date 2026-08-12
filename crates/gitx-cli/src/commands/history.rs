@@ -6,13 +6,17 @@ use gitx_history::timeline::{HistoryService, TimelineOptions};
 use serde_json::json;
 use std::path::PathBuf;
 
+#[allow(clippy::too_many_arguments)] // mirrors search::search's CLI surface
 pub fn timeline(
     cli: &Cli,
     author: Option<String>,
+    committer: Option<String>,
     since: Option<String>,
     until: Option<String>,
     branch: Option<String>,
     path: Option<String>,
+    merges: bool,
+    no_merges: bool,
     max: Option<usize>,
 ) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
@@ -35,8 +39,11 @@ pub fn timeline(
         from,
         path: path.map(PathBuf::from),
         author,
+        committer,
         since: since.as_deref().map(parse_ts).transpose()?,
         until: until.as_deref().map(parse_ts).transpose()?,
+        merges_only: merges,
+        no_merges,
     })?;
 
     if cli.json {
@@ -332,8 +339,11 @@ pub fn file_history(
         from: None,
         path: Some(path_buf),
         author: None,
+        committer: None,
         since: since.as_deref().map(parse_ts).transpose()?,
         until: None,
+        merges_only: false,
+        no_merges: false,
     })?;
 
     if cli.json {

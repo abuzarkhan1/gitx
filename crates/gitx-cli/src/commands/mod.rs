@@ -31,12 +31,17 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
         Commands::Index { action } => index::index_command(&cli, action),
         Commands::Timeline {
             author,
+            committer,
             since,
             until,
             branch,
             path,
+            merges,
+            no_merges,
             max,
-        } => history::timeline(&cli, author, since, until, branch, path, max),
+        } => history::timeline(
+            &cli, author, committer, since, until, branch, path, merges, no_merges, max,
+        ),
         Commands::Commit { oid } => history::commit(&cli, &oid),
         Commands::History {
             path,
@@ -83,6 +88,8 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
         Commands::Search {
             query,
             since,
+            until,
+            path,
             commits,
             files,
             authors,
@@ -98,6 +105,8 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
             &cli,
             &query,
             since.as_deref(),
+            until.as_deref(),
+            path.as_deref(),
             commits,
             files,
             authors,

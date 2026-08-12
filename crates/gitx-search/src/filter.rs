@@ -14,6 +14,11 @@ pub struct SearchFilters {
     pub directories: bool,
     pub since: Option<String>,
     pub author: Option<String>,
+    /// Only commits at or before this unix timestamp (seconds, as string).
+    pub until: Option<String>,
+    /// Restrict file/symbol/directory scopes to this path prefix
+    /// (docs/02 V1 advanced filters).
+    pub path: Option<String>,
 }
 
 impl SearchFilters {

@@ -53,6 +53,10 @@ impl<'a> SearchBackend for SqliteSearchBackend<'a> {
             sql.push_str(" AND c.timestamp >= ?");
             params.push(since.clone());
         }
+        if let Some(until) = &query.filters.until {
+            sql.push_str(" AND c.timestamp <= ?");
+            params.push(until.clone());
+        }
 
         sql.push_str(" ORDER BY score LIMIT 50");
 
@@ -109,6 +113,11 @@ impl<'a> SearchBackend for SqliteSearchBackend<'a> {
         let mut results = Vec::new();
         for r in rows {
             let (path, score) = r.map_err(|e| SearchError::Database(e.to_string()))?;
+            if let Some(prefix) = &query.filters.path {
+                if !path.starts_with(prefix.as_str()) {
+                    continue;
+                }
+            }
             results.push(self.hit(
                 EntityType::File,
                 path.clone(),
@@ -297,6 +306,11 @@ impl<'a> SearchBackend for SqliteSearchBackend<'a> {
         let mut results = Vec::new();
         for r in rows {
             let (name, kind, line, path) = r.map_err(|e| SearchError::Database(e.to_string()))?;
+            if let Some(prefix) = &query.filters.path {
+                if !path.starts_with(prefix.as_str()) {
+                    continue;
+                }
+            }
             let detail = line
                 .map(|l| format!("{kind} · line {l} · {path}"))
                 .unwrap_or_else(|| format!("{kind} · {path}"));
@@ -322,6 +336,11 @@ impl<'a> SearchBackend for SqliteSearchBackend<'a> {
         let mut dirs: Vec<String> = Vec::new();
         for r in rows {
             let path = r.map_err(|e| SearchError::Database(e.to_string()))?;
+            if let Some(prefix) = &query.filters.path {
+                if !path.starts_with(prefix.as_str()) {
+                    continue;
+                }
+            }
             let mut parent = std::path::Path::new(&path).parent();
             while let Some(p) = parent {
                 let dir = p.display().to_string();

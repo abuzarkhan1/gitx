@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 #[path = "../common/mod.rs"]
 mod common;
-use common::sample_repo;
+use common::{sample_repo, FixtureRepo};
 
 #[test]
 fn timeline_returns_commits_newest_first() {
@@ -89,4 +89,66 @@ fn diff_stats_are_real() {
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].insertions, 1);
     assert_eq!(changes[0].deletions, 0);
+}
+
+#[test]
+fn timeline_filters_by_committer_and_merges() {
+    let Some(repo) = FixtureRepo::new("timeline-filters") else {
+        eprintln!("skipping: git CLI unavailable");
+        return;
+    };
+    repo.write("src/lib.rs", "pub fn a() {}\n");
+    repo.commit("feat: base");
+    repo.git(&["checkout", "-q", "-b", "feature"]);
+    repo.git(&["config", "user.email", "bot@example.com"]);
+    repo.git(&["config", "user.name", "Deploy Bot"]);
+    repo.write("src/lib.rs", "pub fn a() {}\npub fn b() {}\n");
+    repo.commit("feat: feature work");
+    repo.git(&["checkout", "-q", "main"]);
+    repo.git(&["merge", "-q", "--no-ff", "feature", "-m", "merge: feature"]);
+
+    let gix = Repository::discover(repo.path()).expect("open fixture");
+    let service = HistoryService::new(&gix);
+
+    // Committer filter matches the feature + merge commits.
+    let by_committer = service
+        .timeline(TimelineOptions {
+            committer: Some("bot@example.com".into()),
+            ..Default::default()
+        })
+        .expect("timeline");
+    assert_eq!(
+        by_committer.len(),
+        2,
+        "expected feature + merge, got {by_committer:?}"
+    );
+    assert!(
+        by_committer
+            .iter()
+            .all(|c| c.committer.email == "bot@example.com"),
+        "committer filter leaked: {by_committer:?}"
+    );
+
+    // Merge-only filter returns exactly the merge commit.
+    let merges = service
+        .timeline(TimelineOptions {
+            merges_only: true,
+            ..Default::default()
+        })
+        .expect("timeline");
+    assert_eq!(merges.len(), 1);
+    assert_eq!(merges[0].parents.len(), 2);
+    assert!(merges[0].message.contains("merge: feature"));
+
+    // No-merges excludes it.
+    let no_merges = service
+        .timeline(TimelineOptions {
+            no_merges: true,
+            ..Default::default()
+        })
+        .expect("timeline");
+    assert!(
+        no_merges.iter().all(|c| c.parents.len() <= 1),
+        "merge commit leaked through no_merges: {no_merges:?}"
+    );
 }
