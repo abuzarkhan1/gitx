@@ -141,9 +141,14 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             app.scroll,
             app.selected,
         ),
-        View::Commits => {
-            views::commits::render(f, area, app.timeline.as_deref(), app.scroll, app.selected)
-        }
+        View::Commits => views::commits::render(
+            f,
+            area,
+            app.timeline.as_deref(),
+            app.timeline_areas.as_deref(),
+            app.scroll,
+            app.selected,
+        ),
         View::Branches => views::branches::render(
             f,
             area,

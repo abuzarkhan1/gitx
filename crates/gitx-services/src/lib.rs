@@ -28,5 +28,5 @@ pub use history::HistoryService;
 pub use index::IndexService;
 pub use recovery::RecoveryService;
 pub use repository::RepositoryService;
-pub use search::SearchService;
+pub use search::{SearchHit, SearchOptions, SearchService};
 pub use state::{IndexState, State};

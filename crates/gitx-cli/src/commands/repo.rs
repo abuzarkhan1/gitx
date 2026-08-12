@@ -64,7 +64,8 @@ pub fn status(cli: &Cli) -> anyhow::Result<()> {
     match state.git.to_lowercase().as_str() {
         "clean" | "" => println!("clean"),
         other => println!("{other} (merge/rebase in progress)"),
-    }    println!("  index    : {}", index_state_label(state.index));
+    }
+    println!("  index    : {}", index_state_label(state.index));
     match head {
         Some(id) => {
             let commit = repo.find_commit(id)?;

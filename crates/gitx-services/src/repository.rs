@@ -50,9 +50,7 @@ impl<'a> RepositoryService<'a> {
         match path {
             Some(p) => Repository::discover(p)
                 .map_err(|e| anyhow::anyhow!("cannot open repository at {}: {e}", p.display())),
-            None => {
-                Repository::discover(".").map_err(|e| anyhow::anyhow!("{e}"))
-            }
+            None => Repository::discover(".").map_err(|e| anyhow::anyhow!("{e}")),
         }
     }
 
@@ -94,11 +92,10 @@ impl<'a> RepositoryService<'a> {
         if commits == 0 {
             return Ok(None);
         }
-        let contributors: u64 = conn.query_row(
-            "SELECT count(DISTINCT author_id) FROM commits",
-            [],
-            |row| row.get(0),
-        )?;
+        let contributors: u64 =
+            conn.query_row("SELECT count(DISTINCT author_id) FROM commits", [], |row| {
+                row.get(0)
+            })?;
         let files: u64 = conn.query_row(
             "SELECT count(*) FROM files WHERE is_current = 1",
             [],
@@ -110,11 +107,8 @@ impl<'a> RepositoryService<'a> {
         let first: Option<i64> = conn
             .query_row("SELECT min(timestamp) FROM commits", [], |row| row.get(0))
             .optional()?;
-        let latest: i64 = conn.query_row(
-            "SELECT max(timestamp) FROM commits",
-            [],
-            |row| row.get(0),
-        )?;
+        let latest: i64 =
+            conn.query_row("SELECT max(timestamp) FROM commits", [], |row| row.get(0))?;
         let mut languages: Vec<(String, u64)> = conn
             .prepare(
                 "SELECT language, count(*) FROM files WHERE is_current = 1 GROUP BY language ORDER BY count(*) DESC",

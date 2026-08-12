@@ -42,7 +42,7 @@ impl State {
                 return State {
                     git,
                     index: IndexState::Failed,
-                }
+                };
             }
         };
         // Corruption / newer-schema detection first.

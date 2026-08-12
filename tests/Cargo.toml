@@ -9,6 +9,7 @@ gitx-git = { path = "../crates/gitx-git" }
 gitx-history = { path = "../crates/gitx-history" }
 gitx-analysis = { path = "../crates/gitx-analysis" }
 gitx-index = { path = "../crates/gitx-index" }
+gitx-services = { path = "../crates/gitx-services" }
 gitx-storage = { path = "../crates/gitx-storage" }
 rusqlite = { workspace = true }
 anyhow = { workspace = true }
@@ -48,3 +49,7 @@ path = "integration/properties.rs"
 [[test]]
 name = "edge_cases"
 path = "integration/edge_cases.rs"
+
+[[test]]
+name = "services"
+path = "integration/services.rs"

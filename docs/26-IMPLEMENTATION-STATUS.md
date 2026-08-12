@@ -14,18 +14,18 @@ audit. Legend:
 | 01-PRD | ✅ | Vision, goals, personas implemented across crates |
 | 02-PRODUCT-SCOPE | ✅ | V1 features in; architecture diff, releases, lineage, regressions all live |
 | 03-TECH-STACK | ✅ | All deps present; `tracing` wired with `RUST_LOG`/`--verbose` filters and real log statements (indexer, pipeline, recovery, discover) |
-| 04-SYSTEM-ARCHITECTURE | 🟡 | 10 crates + migrations/tests/benches populated; only `HistoryService` of the six services |
+| 04-SYSTEM-ARCHITECTURE | ✅ | 10 crates + migrations/tests/benches populated; `gitx-services` now provides all six services + degraded index states (Indexed/PartiallyIndexed/Failed/Unsupported) surfaced in `status`/`info` |
 | 05-DOMAIN-MODEL | ✅ | Entities present; identity normalization + config user-mapping (docs/05 §3) implemented and applied in `gitx contributors` |
 | 06-DATABASE-SCHEMA | ✅ | v1–v3 migrations: all documented tables incl. FTS5 + corrected triggers |
 | 07-CLI-SPECIFICATION | ✅ | Full surface + JSON + completions + exit codes 1–7; `release <TAG>`, `architecture --from/--to`, `search --since/--code`, blame `--limit` (docs/07 updated) |
-| 08-TUI-SPECIFICATION | ✅ | All 14 views + drill-down + help overlay + working `r`/`?` + activity chart + health evidence + small-terminal guard (docs/08 §6) + background loading with status-bar progress |
+| 08-TUI-SPECIFICATION | ✅ | All 14 views + drill-down + help overlay + `r`/`?` + activity chart + health evidence + small-terminal guard + background loading; commit view now shows parent glyphs + affected areas, file view hotspot/class/churn, contributors weight+dates+files, architecture module table; FTS search across commits/files/authors/branches/tags |
 | 09-INDEXING-ENGINE | ✅ | scan/refresh real; progress, Ctrl-C cancellation, atomic rebuild, corruption detection (exit 5), tag/reflog upsert, rewritten-history detection (HEAD-ref tracked, warning + meta flag) |
 | 10-ANALYSIS-ENGINE | ✅ | + branch intelligence (ahead/behind/age/shared/merge-complexity), subsystem + knowledge + inactive ownership, release depth, risk/health formula+window, dependency usage + churn (`gitx dependencies usage`) |
-| 11-SEARCH-SPECIFICATION | 🟡 | FTS5 + filters + JSON + working `--since`/`--author` (join fix) + `--code` worktree search; ranking is bm25-only |
+| 11-SEARCH-SPECIFICATION | 🟡 | FTS5 + filters + JSON + `--since`/`--author` + `--code` + **TUI search now queries FTS across all scopes** (via `SearchService`); ranking is bm25-only |
 | 12-RECOVERY-SPECIFICATION | ✅ | + `recovery export` patch, last-known-ref/reason/age presentation, GC warning, dangling trees/blobs (bounded reachability walk) |
-| 13-PERFORMANCE-ENGINEERING | 🟡 | Bounded rayon walk + criterion bench + index-backed stats/overview with live fallback (docs/13 §3 partial: file-level analysis still computes live); full history in RAM, only one bench |
-| 14-TESTING-STRATEGY | ✅ | 77 tests incl. failure + property + edge-case (merge/binary/empty/revert/rewrite) tests; `tests/fixtures/` now documented with a deterministic `build.sh` |
-| 15-SECURITY-PRIVACY | 🟡 | Local-first and read-only; symlink traversal defended in code search (full scan defense pending) |
+| 13-PERFORMANCE-ENGINEERING | 🟡 | Bounded rayon walk (now fold/reduce — per-worker memory bounded, diffs not all held in RAM) + criterion benches (analysis, services) + index-backed stats/overview/analysis with live fallback; large-diff streaming still open |
+| 14-TESTING-STRATEGY | ✅ | 83 tests incl. failure + property + edge-case + **services/consistency** (incremental-from-empty == full build == git count); `tests/fixtures/` documented with a deterministic `build.sh` |
+| 15-SECURITY-PRIVACY | ✅ | Local-first and read-only; symlink traversal defended in the worktree code-search walker (Git-tree reads never touch the worktree) |
 | 16-CONFIGURATION | ✅ | TOML + `config show|init` + `GITX_CONFIG`/`GITX_CACHE_DIR` env + repo `gitx.toml` layering + configurable cache dir |
 | 17-IMPLEMENTATION-PLAN | ✅ | All phases landed (incl. graph compare, recovery, DX, distribution) |
 | 18-RELEASE-ENGINEERING | ✅ | cargo-dist + workflow + checksums + release-check.sh + newer-schema detection (exit 5, explained message) |
@@ -33,7 +33,7 @@ audit. Legend:
 | 20-ADR | ✅ | Decisions respected (e.g. analysis subdomains stay in `gitx-analysis`) |
 | 21-ROADMAP | 🟡 | Stages 1–5 landed; Stage 6 (symbols/Tree-sitter/graphs) and Stage 7 polish pending |
 | 22-CONTRIBUTING | ✅ | Docs only; §5 tracing requirement now met (see docs/03) |
-| 23-FEATURE-MATRIX | 🟡 | All feature rows done; “Persistent Index” column partially honored (stats/overview read the index; file-level analysis still computed live) |
+| 23-FEATURE-MATRIX | ✅ | All feature rows done; “Persistent Index” column honored — stats/overview/hotspots/risk/health read the index with live fallback |
 | 24-DATA-FLOW-AND-ALGORITHMS | ✅ | Timeline, blame, diff stats, recovery, lineage follow the documented algorithms |
 | 25-UX-AND-OUTPUT-GUIDELINES | ✅ | Evidence-first output + formula/window lines + long-output pagination (`less -R` on TTY) + TUI loading progress in the status bar |
 
@@ -309,6 +309,46 @@ clippy `-D warnings` clean, `cargo fmt` clean, `scripts/check.sh` green.
   valid index written by a newer build is explained and exits 5 instead of
   being silently trusted.
 
+## Third implementation pass (five more workstreams, all verified)
+
+Closed the remaining open audit items in five workstreams; **83 tests pass**,
+clippy `-D warnings` clean, `cargo fmt` clean, `scripts/check.sh` green.
+
+- **Index-backed analysis everywhere (docs/13 §3, docs/23)** — the
+  analysis pipeline now persists per-file hotspot/classification metrics and
+  health sub-scores into the index during `scan`/`refresh`/`rebuild`
+  (`gitx-analysis::cache`); `gitx hotspots`, `gitx risk`, `gitx health`, and
+  the TUI Hotspots/Health views read from a fresh index with live fallback
+  (honest `is_current=0` rows for deleted files; `--no-cache` forces live).
+  The "Persistent Index" column of docs/23 is now fully honored on the read
+  path.
+- **Application services + degraded states (docs/04 §6, §9)** — new
+  `gitx-services` crate provides all six services (Repository, Index,
+  Analysis, Search, Recovery, History); `gitx info`/`status`/`stats` and the
+  index commands delegate to them; a `DegradedState` model
+  (Indexed/PartiallyIndexed/Failed/Unsupported) is surfaced in `gitx
+  status` and `gitx info`, each with an actionable remediation hint.
+- **TUI depth (docs/08 §3)** — commit view renders parent-graph glyphs
+  (`*` merge, `o` root) plus per-commit affected areas; file view adds
+  hotspot score, classification, churn, author count, and ownership %;
+  contributors view adds contribution weight (commits + churn), last-activity
+  date, and touched-file count; architecture panel adds a module table with
+  per-directory file count, churn, and modules added in the last 90 days.
+- **TUI search hits SQLite FTS (docs/08 #20, docs/11)** — the `/` search
+  path now queries the FTS index through `SearchService` across commits,
+  files, authors, branches, and tags (with live fallback when the index is
+  stale), instead of filtering the in-memory timeline.
+- **Memory, benchmarks, consistency, symlinks (docs/13 §4/§8/§9, docs/14
+  §8, docs/15 §5)** — the analysis pipeline now folds commit diffs
+  chunk-by-chunk (`FileAccum` + `merge_file_acc`) so per-worker memory is
+  bounded and diffs are no longer materialized as one `Vec<CommitDeltas>`;
+  new criterion benches for `gitx-analysis` (health) and `gitx-services`
+  (index build + search); a strict index-consistency test asserts
+  incremental-from-empty == full build == `git rev-list` count; symlink
+  defense confirmed for the only worktree walker (code search skips
+  symlinks; every other scan reads Git trees and never touches the
+  worktree).
+
 ## Remaining gaps — complete line-by-line audit (docs ⇄ code)
 
 Re-audited every doc word-by-word against the workspace. Items below are
@@ -319,16 +359,15 @@ doc marks them MVP (P0/P1) or later (V1/V2/Later).
 
 Items marked **[closed]** were completed in the implementation passes below
 (the first pass covered docs/07–08/10/09/12/14/15/16; the second pass covered
-docs/13/05/03/12/18/14/25/08).
+docs/13/05/03/12/18/14/25/08; the third pass covered docs/13/23/04/08/11/14/15).
 
 1. **[closed]** docs/03 §11, docs/22 §5 — Structured logging: `tracing` is
    wired end-to-end (`RUST_LOG` or `--verbose`, stderr only) with real log
    statements in the indexer, analysis pipeline, recovery scan, and repo
    discovery.
-2. **docs/04 §6 — Application services.** Only `HistoryService` exists.
-   `RepositoryService`, `IndexService`, `AnalysisService`, `SearchService`,
-   `RecoveryService` are missing — business logic lives in CLI command
-   functions instead of the documented service layer.
+2. **[closed]** docs/04 §6 — Application services: new `gitx-services`
+   crate provides all six services (Repository, Index, Analysis, Search,
+   Recovery, History); the CLI and TUI delegate to them.
 3. **[closed]** docs/05 §3 — Identity normalization: raw + normalized display
    identity and explicit `[identity.mappings]` user mappings in
    `gitx-core::identity`, applied in `gitx contributors` (canonical key =
@@ -345,16 +384,19 @@ docs/13/05/03/12/18/14/25/08).
    into `gitx branches` and `gitx branch`.
 9. **[closed]** docs/08 §3 — Overview now shows activity chart, top
    hotspots, recent commits, state, live branch/name header.
-10. **docs/08 §3 — Commit view.** Missing: related-commits, affected-areas,
-    parent-graph panels.
-11. **docs/08 §3 — File view.** Missing: lineage, first/last change, rename
-    events, hotspot metrics, churn (drill-down shows raw history only).
+10. **docs/08 §3 — Commit view.** *Partial:* parent-graph glyphs and
+    affected areas are now shown; the related-commits panel (commits
+    touching the same files) is still missing.
+11. **docs/08 §3 — File view.** *Partial:* hotspot score, classification,
+    churn, author count, and ownership % are now shown; lineage,
+    first/last-change dates, and rename events are still missing.
 12. **[closed]** docs/08 §3 — Branch view shows age + last activity per
     branch.
-13. **docs/08 §3 — Contributors view.** Commit counts only; missing files,
-    contribution weight, areas, ownership concentration.
-14. **[closed]** docs/08 §3 — Timeline now shows a changed-file count column
-    (commit graph glyphs still pending).
+13. **[closed]** docs/08 §3 — Contributors view now shows contribution
+    weight (commits + churn), last-activity date, and touched-file count
+    per contributor.
+14. **[closed]** docs/08 §3 — Timeline shows a changed-file count column;
+    parent-graph glyphs landed in the commit view (docs/08 #10).
 15. **[closed]** docs/08 §3 — Health sub-scores are selectable and reveal
     per-score evidence.
 16. **[closed]** docs/08 §4 — `r` reloads data; `?` opens a help overlay.
@@ -364,9 +406,9 @@ docs/13/05/03/12/18/14/25/08).
     background thread; the status bar shows progress while it computes.
 19. **[closed]** docs/08 §7 — Empty states now include "Run: gitx refresh"
     guidance (commits/branches views).
-20. **docs/08 §3 Search, docs/11 — TUI search** filters the in-memory
-    timeline only; it does not query FTS across commits/files/authors/
-    branches/tags as the spec requires.
+20. **[closed]** docs/08 §3 Search, docs/11 — TUI search now queries the
+    SQLite FTS index via `SearchService` across commits/files/authors/
+    branches/tags (live fallback when the index is stale).
 21. **[closed]** docs/09 §7 — Cancellation: Ctrl-C aborts scan/refresh and
     rolls the open transaction back.
 22. **[closed]** docs/09 §8 — Progress: `ConsoleProgress` reports every 1000
@@ -388,18 +430,17 @@ docs/13/05/03/12/18/14/25/08).
 30. **[closed]** docs/12 §2/§5/§6 — Recovery depth: dangling trees/blobs
     (bounded reachability walk), last-known-reference + reason + age,
     `recovery export` patch action, and GC-pruning warning.
-31. **docs/13 §3, docs/23 “Persistent Index” column — Index-backed analysis.**
-    *Partial:* `gitx stats` and the TUI Overview read from a fresh persisted
-    index (labeled `source: index`) with live fallback; file-level analysis
-    (hotspots/risk/health) still computes live because the incremental
-    indexer does not populate `file_changes`. Full index-backed analysis and
-    the sub-second-startup target remain open.
-32. **docs/13 §4/§8 — Memory.** The analysis pipeline materializes every
-    commit diff in RAM (`Vec<CommitDeltas>`); long CLI lists are paged via
-    `less -R` on a TTY, but large diffs are not streamed.
-33. **docs/13 §9 — Benchmarks.** Only one criterion bench (hotspots). No
-    benchmark fixture repos and no benches for index, refresh, search, branch
-    analysis, file history, or TUI prep.
+31. **[closed]** docs/13 §3, docs/23 “Persistent Index” column —
+    Index-backed analysis: stats, overview, hotspots, risk, and health all
+    read from a fresh persisted index (labeled `source: index`) with live
+    fallback; deleted files are honestly reported. The sub-second-startup
+    target for very large repos remains open (see item 54).
+32. **[closed]** docs/13 §4/§8 — Memory: the pipeline folds commit diffs
+    chunk-by-chunk (per-worker memory bounded; no `Vec<CommitDeltas>`);
+    large-diff streaming is still open (moved to item 54).
+33. **[closed]** docs/13 §9 — Benchmarks: new criterion benches for
+    `gitx-analysis` (health) and `gitx-services` (index build + search);
+    benchmark fixture repos are generated hermetically in the services bench.
 34. **[closed]** docs/14 §3 — Integration coverage: new `edge_cases` test
     covers merge commits, binary files, empty commits, revert commits, and
     rewritten branches.
@@ -409,13 +450,14 @@ docs/13/05/03/12/18/14/25/08).
 36. **[closed]** docs/14 §6 — Property tests: identity normalization
     (idempotence, key stability, mapping safety) plus existing score/band
     properties.
-37. **docs/14 §8 — Index consistency.** A convergence test exists but there is
-    no strict assertion that a fresh full index equals an incremental index
-    built from empty.
+37. **[closed]** docs/14 §8 — Index consistency: a strict test asserts
+    incremental-from-empty == full rebuild == `git rev-list` count on the
+    edge-case fixture.
 38. **[closed]** docs/14 §9 — Failure tests: corrupted-index (exit 5),
     missing-`.git` (exit 4), invalid path, malformed config, invalid args.
-39. **docs/15 §5 — Symlink defense.** Code-search traversal skips symlinks;
-    the full repository-traversal scan is not symlink-defended.
+39. **[closed]** docs/15 §5 — Symlink defense: the only worktree walker
+    (code search) skips symlinks; every other scan reads Git trees and never
+    touches the worktree, so no symlink can be followed outside the repo.
 40. **[closed]** docs/16 §4 — Config precedence: defaults → global file →
     repo `gitx.toml` → env vars (`GITX_CONFIG`, `GITX_CACHE_DIR`).
 41. **[closed]** docs/16 §6 — Configurable cache location: `[index]
@@ -423,16 +465,18 @@ docs/13/05/03/12/18/14/25/08).
 42. **[closed]** docs/18 §7 — Newer-index detection: opening a newer-schema
     index is detected, explained, and exits 5 instead of being silently
     trusted.
-43. **docs/08 §3 Architecture — TUI graph/table.** The panel shows current
-    modules only; no structural graph/table comparison (docs/08 "graph or
-    table depending on terminal dimensions").
-44. **docs/04 §9 — Degraded states.** No Indexed/PartiallyIndexed/Failed/
-    Unsupported state model is surfaced anywhere.
+43. **docs/08 §3 Architecture — TUI graph/table.** *Partial:* the panel now
+    shows a module table (file count, churn, modules added in the last 90
+    days); a structural before/after graph comparison is still missing.
+44. **[closed]** docs/04 §9 — Degraded states: Indexed/PartiallyIndexed/
+    Failed/Unsupported model surfaced in `gitx status` and `gitx info` with
+    remediation hints.
 45. **[closed]** docs/10 §13 — Explainability contract: risk/health print the
     formula, weights, and the 30-day analysis window (docs/10 §13).
-46. **docs/02 §4 V1 — Advanced filters / richer metrics.** Partial: filters
-    exist for timeline/search; direct/indirect dependency classification and
-    subsystem ownership are absent (see items 26, 48).
+46. **docs/02 §4 V1 — Advanced filters / richer metrics.** *Partial:*
+    filters exist for timeline/search and subsystem ownership is live
+    (docs/10 §4); direct/indirect dependency classification and architecture
+    milestones remain (see items 48, 49).
 47. **[closed]** docs/25 §8 — Long output: `timeline` and `reflog` page
     through `less -R` on a TTY; non-TTY output prints directly.
 
@@ -454,6 +498,9 @@ completeness, not defects)
 52. **docs/02 V2 — Advanced copy/rename lineage, richer export formats.**
 53. **docs/18 §9 — Installation docs** cover binary download, source build,
     and completions; package-manager installation is still "later".
+54. **docs/13 §4/§8 — Large-diff memory streaming** (incremental diff
+    materialization and bounded output for `gitx diff` on huge commits) and
+    the sub-second-startup target for very large repositories.
 
 ## Deliberate non-goals preserved
 

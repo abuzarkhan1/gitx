@@ -52,14 +52,18 @@ impl<'a> SearchService<'a> {
         // Commits (message + author). `--since` filtering is applied by the
         // CLI layer before calling; the service matches across the whole index.
         if options.commits {
-            let sql = "SELECT c.oid, c.message, a.name FROM commits_fts f \
+            let sql = "SELECT c.oid, c.message, COALESCE(a.name, '') FROM commits_fts f \
                        JOIN commits c ON c.rowid = f.rowid \
                        LEFT JOIN authors a ON a.id = c.author_id \
                        WHERE commits_fts MATCH ?1 \
                        ORDER BY c.timestamp DESC LIMIT 200";
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt.query_map(rusqlite::params![query], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             })?;
             for row in rows {
                 let (oid, message, author) = row?;
@@ -90,7 +94,8 @@ impl<'a> SearchService<'a> {
 
         // Authors (name/email).
         if options.authors {
-            let sql = "SELECT a.name, a.email FROM authors_fts a WHERE authors_fts MATCH ?1 LIMIT 100";
+            let sql =
+                "SELECT a.name, a.email FROM authors_fts a WHERE authors_fts MATCH ?1 LIMIT 100";
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt.query_map([query], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))

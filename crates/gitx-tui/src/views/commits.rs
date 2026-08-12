@@ -6,6 +6,7 @@ pub fn render(
     f: &mut Frame,
     area: Rect,
     timeline: Option<&[Commit]>,
+    areas: Option<&[String]>,
     scroll: usize,
     selected: usize,
 ) -> usize {
@@ -14,7 +15,17 @@ pub fn render(
         Some([]) => vec!["No commits found.".to_string()],
         Some(commits) => commits
             .iter()
-            .map(|c| {
+            .enumerate()
+            .map(|(i, c)| {
+                // Parent-graph glyphs (docs/08 #14): `*` merge (2+ parents),
+                // `•` normal, `⊙` root.
+                let glyph = if c.parents.is_empty() {
+                    "⊙"
+                } else if c.parents.len() > 1 {
+                    "*"
+                } else {
+                    "•"
+                };
                 let parents = if c.parents.is_empty() {
                     "root".to_string()
                 } else {
@@ -24,7 +35,15 @@ pub fn render(
                         .collect::<Vec<_>>()
                         .join(",")
                 };
-                format!("{}  parents {}", common::commit_line(c, 60), parents)
+                let area = areas
+                    .and_then(|a| a.get(i))
+                    .filter(|a| !a.is_empty())
+                    .map(|a| format!("  in {a}"))
+                    .unwrap_or_default();
+                format!(
+                    "{glyph} {}  parents {parents}{area}",
+                    common::commit_line(c, 50)
+                )
             })
             .collect(),
     };

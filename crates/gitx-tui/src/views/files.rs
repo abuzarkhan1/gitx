@@ -16,16 +16,26 @@ pub fn render(
             .files
             .iter()
             .map(|file| {
+                let churn = file.metrics.lines_added + file.metrics.lines_deleted;
                 format!(
-                    "{}  {} commits  +{} −{}  {} contributors",
+                    "{:>5.1} {:<7}  {}  {:>4} changes  {:>6} churn  {:>2} authors  {:.0}% owned",
+                    file.hotspot,
+                    file.classification,
                     file.path.display(),
                     file.metrics.change_frequency,
-                    file.metrics.lines_added,
-                    file.metrics.lines_deleted,
-                    file.metrics.unique_contributors
+                    churn,
+                    file.metrics.unique_contributors,
+                    file.ownership_concentration
                 )
             })
             .collect(),
     };
-    common::render_scrollable(f, area, " Files ", &rows, scroll, selected)
+    common::render_scrollable(
+        f,
+        area,
+        " Files (hotspot | class) ",
+        &rows,
+        scroll,
+        selected,
+    )
 }

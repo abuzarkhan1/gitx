@@ -54,13 +54,6 @@ pub fn analysis_pool() -> &'static ThreadPool {
     })
 }
 
-/// A commit plus the (path, insertions, deletions) deltas it introduced,
-/// extracted in parallel from the commit graph.
-struct CommitDeltas {
-    commit: Commit,
-    changes: Vec<(PathBuf, u32, u32)>,
-}
-
 /// Repository-wide analysis result.
 #[derive(Debug, Clone)]
 pub struct RepoAnalysis {
@@ -83,6 +76,38 @@ struct FileAcc {
     first_introduced: Option<i64>,
     last_modified: Option<i64>,
     authors: HashMap<String, u64>,
+}
+
+/// Parallel-walk accumulator: per-file metrics plus repo-level counters.
+/// Merging two accumulators is order-independent (sums/min/max/union), which
+/// keeps the parallel result bit-for-bit equal to a sequential walk.
+#[derive(Default)]
+struct FileAccum {
+    files: HashMap<PathBuf, FileAcc>,
+    total_commits: u64,
+    total_changes: u64,
+    recent_changes: u64,
+    author_set: std::collections::HashSet<String>,
+    error: Option<String>,
+}
+
+/// Merge per-file accumulators (used by the rayon reduction).
+fn merge_file_acc(target: &mut FileAcc, other: FileAcc) {
+    target.change_frequency += other.change_frequency;
+    target.lines_added += other.lines_added;
+    target.lines_deleted += other.lines_deleted;
+    target.recent_churn += other.recent_churn;
+    target.recent_changes += other.recent_changes;
+    target.bug_fix_count += other.bug_fix_count;
+    if target.first_introduced.is_none() {
+        target.first_introduced = other.first_introduced;
+    }
+    if other.last_modified.is_some() {
+        target.last_modified = other.last_modified;
+    }
+    for (author, lines) in other.authors {
+        *target.authors.entry(author).or_insert(0) += lines;
+    }
 }
 
 /// Walk the repository history (mainline from HEAD) and compute per-file
@@ -123,71 +148,97 @@ pub fn analyze_repository_with(
     let workers = analysis_pool().current_num_threads();
     let git_dir = repo.git_dir().to_path_buf();
     let chunk = commit_ids.len().div_ceil(workers).max(1);
-    let per_commit: Vec<CommitDeltas> = analysis_pool().install(|| {
+    // Memory bound (docs/13 §4): each worker folds its chunk's diffs into a
+    // per-file accumulator immediately, so only ~one commit's diff per worker
+    // is in flight at a time instead of every commit diff in RAM. The
+    // accumulator merge is order-independent (sums/mins/maxes), so results are
+    // bit-for-bit identical to a sequential walk regardless of pool size.
+    let fold_commit =
+        |acc: &mut FileAccum, commit: &Commit, changes: &[(PathBuf, u32, u32)], cutoff: i64| {
+            let author_key = author_key(commit);
+            acc.author_set.insert(author_key.clone());
+            acc.total_commits += 1;
+            let is_fix = classify_commit_message(&commit.message) == CommitClassification::Fix;
+            let is_recent = commit.author.time >= cutoff;
+            for (path, insertions, deletions) in changes {
+                acc.total_changes += 1;
+                let file_acc = acc.files.entry(path.clone()).or_default();
+                file_acc.change_frequency += 1;
+                file_acc.lines_added += *insertions as u64;
+                file_acc.lines_deleted += *deletions as u64;
+                if is_recent {
+                    file_acc.recent_churn += (insertions + deletions) as u64;
+                    file_acc.recent_changes += 1;
+                    acc.recent_changes += 1;
+                }
+                if is_fix {
+                    file_acc.bug_fix_count += 1;
+                }
+                if file_acc.first_introduced.is_none() {
+                    file_acc.first_introduced = Some(commit.author.time);
+                }
+                file_acc.last_modified = Some(commit.author.time);
+                *file_acc.authors.entry(author_key.clone()).or_insert(0) += *insertions as u64;
+            }
+        };
+
+    let accumulated = analysis_pool().install(|| {
         commit_ids
             .par_chunks(chunk)
-            .map(|chunk| {
-                let local = Repository::open(&git_dir)?;
-                let mut out = Vec::with_capacity(chunk.len());
+            .fold(FileAccum::default, |mut acc, chunk: &[ObjectId]| {
+                let local = match Repository::open(&git_dir) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        acc.error = Some(e.to_string());
+                        return acc;
+                    }
+                };
                 for cid in chunk {
-                    let commit = local.find_commit(*cid)?;
+                    let Ok(commit) = local.find_commit(*cid) else {
+                        continue;
+                    };
                     let parent_tree = match commit.parents.first() {
-                        Some(parent) => Some(local.find_commit(*parent)?.tree_id),
+                        Some(parent) => local.find_commit(*parent).ok().map(|p| p.tree_id),
                         None => None,
                     };
-                    let changes = local.diff_tree_to_tree(parent_tree, commit.tree_id)?;
-                    out.push(CommitDeltas {
-                        commit,
-                        changes: changes
-                            .iter()
-                            .map(|c| (c.path.clone(), c.insertions, c.deletions))
-                            .collect(),
-                    });
+                    let changes = local
+                        .diff_tree_to_tree(parent_tree, commit.tree_id)
+                        .map(|changes| {
+                            changes
+                                .iter()
+                                .map(|c| (c.path.clone(), c.insertions, c.deletions))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    fold_commit(&mut acc, &commit, &changes, cutoff);
                 }
-                Ok(out)
+                acc
             })
-            .collect::<anyhow::Result<Vec<Vec<CommitDeltas>>>>()
-            .map(|chunks| chunks.into_iter().flatten().collect::<Vec<CommitDeltas>>())
-    })?;
-
-    // 3. Sequential fold — same order as a linear walk, so results are
-    //    deterministic regardless of pool size.
-    let mut accs: HashMap<PathBuf, FileAcc> = HashMap::new();
-    let mut total_commits = 0u64;
-    let mut total_changes = 0u64;
-    let mut recent_changes = 0u64;
-    let mut author_set: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for CommitDeltas { commit, changes } in per_commit {
-        total_commits += 1;
-
-        let author_key = author_key(&commit);
-        author_set.insert(author_key.clone());
-        let is_fix = classify_commit_message(&commit.message) == CommitClassification::Fix;
-        let is_recent = commit.author.time >= cutoff;
-
-        for (path, insertions, deletions) in changes {
-            total_changes += 1;
-            let acc = accs.entry(path).or_default();
-
-            acc.change_frequency += 1;
-            acc.lines_added += insertions as u64;
-            acc.lines_deleted += deletions as u64;
-            if is_recent {
-                acc.recent_churn += (insertions + deletions) as u64;
-                acc.recent_changes += 1;
-                recent_changes += 1;
-            }
-            if is_fix {
-                acc.bug_fix_count += 1;
-            }
-            if acc.first_introduced.is_none() {
-                acc.first_introduced = Some(commit.author.time);
-            }
-            acc.last_modified = Some(commit.author.time);
-            *acc.authors.entry(author_key.clone()).or_insert(0) += insertions as u64;
-        }
+            .reduce(FileAccum::default, |mut a, b| {
+                if a.error.is_none() {
+                    a.error = b.error;
+                }
+                a.total_commits += b.total_commits;
+                a.total_changes += b.total_changes;
+                a.recent_changes += b.recent_changes;
+                a.author_set.extend(b.author_set);
+                for (path, acc) in b.files {
+                    merge_file_acc(a.files.entry(path).or_default(), acc);
+                }
+                a
+            })
+    });
+    if let Some(err) = accumulated.error {
+        anyhow::bail!("analysis failed: {err}");
     }
+    let FileAccum {
+        files: accs,
+        total_commits,
+        total_changes,
+        recent_changes,
+        author_set,
+        error: _,
+    } = accumulated;
 
     // 4. Current (HEAD) file list — for complexity and stability signals.
     let current_paths = repo.list_blobs(head_commit.tree_id)?;

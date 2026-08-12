@@ -50,8 +50,9 @@ pub struct App {
     pub recovery: Option<gitx_analysis::RecoveryReport>,
     /// Search query being typed (docs/08 Search panel).
     pub search_query: String,
-    /// Search results: matching timeline commits.
-    pub search_results: Option<Vec<gitx_git::models::Commit>>,
+    /// Search results: FTS hits across commits/files/authors/branches/tags
+    /// (docs/11), produced by `SearchService`.
+    pub search_results: Option<Vec<gitx_services::SearchHit>>,
     /// The repository work directory (when discovered).
     pub repo_path: Option<String>,
     /// Scroll offset for the current content view (docs/08: j/k scrolls).
@@ -138,6 +139,7 @@ impl App {
             show_help: false,
             activity: None,
             timeline_file_counts: None,
+            timeline_areas: None,
             branch_tips: None,
             repo_state: None,
             health_evidence: Vec::new(),
@@ -158,6 +160,7 @@ impl App {
         self.repo_path = data.repo_path;
         self.activity = data.activity;
         self.timeline_file_counts = data.timeline_file_counts;
+        self.timeline_areas = data.timeline_areas;
         self.branch_tips = data.branch_tips;
         self.repo_state = data.repo_state;
         self.health_evidence = data.health_evidence;
@@ -281,9 +284,16 @@ impl App {
                 })
             }),
             View::Search => self.search_results.as_ref().and_then(|list| {
-                list.get(self.selected).map(|c| Detail::Commit {
-                    oid: c.id.to_string(),
-                })
+                list.get(self.selected)
+                    .and_then(|hit| match hit.scope.as_str() {
+                        "commit" => Some(Detail::Commit {
+                            oid: hit.id.clone(),
+                        }),
+                        "file" => Some(Detail::File {
+                            path: std::path::PathBuf::from(&hit.id),
+                        }),
+                        _ => None,
+                    })
             }),
             View::Files | View::Hotspots | View::Risk | View::Ownership => self
                 .hotspots
@@ -350,26 +360,40 @@ impl App {
         }
     }
 
-    /// Re-run the in-memory search over the loaded timeline (docs/08 Search).
+    /// Run an FTS search through `SearchService` across commits, files,
+    /// authors, branches and tags (docs/08 Search, docs/11). Falls back to an
+    /// empty result list when the repository cannot be opened.
     pub fn run_search(&mut self) {
-        let query = self.search_query.trim().to_lowercase();
-        if query.is_empty() {
+        let raw = self.search_query.trim();
+        if raw.is_empty() {
             self.search_results = None;
             return;
         }
-        let results = self
-            .timeline
-            .iter()
-            .flatten()
-            .filter(|c| {
-                c.message.to_lowercase().contains(&query)
-                    || c.author.name.to_lowercase().contains(&query)
-                    || c.author.email.to_lowercase().contains(&query)
-                    || c.id.to_string().contains(&query)
-            })
-            .cloned()
-            .collect();
-        self.search_results = Some(results);
+        let repo = match &self.repo_path {
+            Some(path) => match gitx_git::Repository::discover(path) {
+                Ok(r) => r,
+                Err(_) => {
+                    self.search_results = Some(Vec::new());
+                    return;
+                }
+            },
+            None => {
+                self.search_results = Some(Vec::new());
+                return;
+            }
+        };
+        // FTS5-safe phrase query: quote the input (doubling embedded quotes).
+        let query = format!("\"{}\"", raw.replace('"', "\"\""));
+        let service = gitx_services::SearchService::new(&repo);
+        let options = gitx_services::SearchOptions {
+            commits: true,
+            files: true,
+            authors: true,
+            branches: true,
+            tags: true,
+            ..Default::default()
+        };
+        self.search_results = Some(service.search(&query, &options).unwrap_or_default());
     }
 }
 
@@ -425,6 +449,7 @@ fn load_repo_stats() -> AppData {
                 error: Some(format!("not inside a Git repository: {err}")),
                 activity: None,
                 timeline_file_counts: None,
+                timeline_areas: None,
                 branch_tips: None,
                 repo_state: None,
                 health_evidence: Vec::new(),
@@ -457,7 +482,7 @@ fn load_repo_stats() -> AppData {
     let files_by_author = hotspots.as_ref().map(|a| {
         let mut map: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         for file in &a.files {
-            for (author, _) in &file.author_lines {
+            for author in file.author_lines.keys() {
                 *map.entry(author.clone()).or_insert(0) += 1;
             }
         }
@@ -498,7 +523,9 @@ fn load_repo_stats() -> AppData {
                     Some(parent) => repo.find_commit(*parent).ok().map(|p| p.tree_id),
                     None => None,
                 };
-                let changes = repo.diff_tree_to_tree(parent_tree, c.tree_id).unwrap_or_default();
+                let changes = repo
+                    .diff_tree_to_tree(parent_tree, c.tree_id)
+                    .unwrap_or_default();
                 let mut dirs: std::collections::HashMap<String, u32> =
                     std::collections::HashMap::new();
                 for change in &changes {
@@ -511,7 +538,7 @@ fn load_repo_stats() -> AppData {
                     *dirs.entry(dir).or_insert(0) += 1;
                 }
                 let top = dirs.into_iter().max_by_key(|(_, n)| *n).map(|(d, _)| d);
-                (changes.len() as u32, top.unwrap_or_else(|| String::new()))
+                (changes.len() as u32, top.unwrap_or_default())
             })
             .collect::<Vec<(u32, String)>>()
     });
@@ -579,6 +606,7 @@ fn load_repo_stats() -> AppData {
         error: None,
         activity,
         timeline_file_counts,
+        timeline_areas,
         branch_tips,
         repo_state,
         health_evidence,

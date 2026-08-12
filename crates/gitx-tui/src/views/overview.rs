@@ -155,7 +155,11 @@ pub fn architecture_panel(
         None => "No repository loaded.".to_string(),
         Some(a) if a.files.is_empty() => "No files analyzed.".to_string(),
         Some(a) => {
-            let mut dirs: std::collections::HashMap<String, usize> =
+            // Module table (docs/08 #43): per-directory file count, churn,
+            // and files added in the last 90 days — a deterministic
+            // architecture snapshot table.
+            let cutoff = chrono::Utc::now().timestamp() - 90 * 86_400;
+            let mut dirs: std::collections::HashMap<String, (usize, u64, usize)> =
                 std::collections::HashMap::new();
             for file in &a.files {
                 let dir = file
@@ -164,17 +168,34 @@ pub fn architecture_panel(
                     .filter(|p| !p.as_os_str().is_empty())
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|| ".".into());
-                *dirs.entry(dir).or_insert(0) += 1;
+                let entry = dirs.entry(dir).or_insert((0, 0, 0));
+                entry.0 += 1;
+                entry.1 += file.metrics.lines_added as u64 + file.metrics.lines_deleted as u64;
+                if file
+                    .metrics
+                    .first_introduced
+                    .map(|t| t.timestamp() >= cutoff)
+                    .unwrap_or(false)
+                {
+                    entry.2 += 1;
+                }
             }
-            let mut list: Vec<(String, usize)> = dirs.into_iter().collect();
-            list.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+            let mut list: Vec<(String, usize, u64, usize)> = dirs
+                .into_iter()
+                .map(|(dir, (files, churn, recent))| (dir, files, churn, recent))
+                .collect();
+            list.sort_by_key(|(_, files, _, _)| std::cmp::Reverse(*files));
             let mut out = format!(
                 "directories: {}  files analyzed: {}\n\n",
                 list.len(),
                 a.files.len()
             );
-            for (dir, files) in list.iter().take(25) {
-                out.push_str(&format!("{:<40} {files}\n", dir));
+            out.push_str(&format!(
+                "{:<36} {:>6} {:>9} {:>11}\n",
+                "module", "files", "churn", "new(90d)"
+            ));
+            for (dir, files, churn, recent) in list.iter().take(25) {
+                out.push_str(&format!("{dir:<36} {files:>6} {churn:>9} {recent:>11}\n"));
             }
             out
         }

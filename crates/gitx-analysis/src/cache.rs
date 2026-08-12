@@ -47,7 +47,9 @@ pub fn store(
     let mut file_ids: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
     {
         let mut stmt = tx.prepare("SELECT id, path FROM files")?;
-        let rows = stmt.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
         for row in rows {
             let (id, path) = row?;
             file_ids.insert(path, id);
@@ -130,7 +132,9 @@ pub fn store(
             churn,
             f.metrics.unique_contributors,
             f.metrics.bug_fix_count,
-            f.metrics.lines_added.saturating_sub(f.metrics.lines_deleted),
+            f.metrics
+                .lines_added
+                .saturating_sub(f.metrics.lines_deleted),
             f.hotspot,
             now,
         ])?;
@@ -360,8 +364,6 @@ fn author_id_for(tx: &rusqlite::Transaction<'_>, key: &str) -> anyhow::Result<i6
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn author_key_split_round_trips() {
         let (name, email) = match "Abuzar <a@x.co>".split_once(" <") {

@@ -42,16 +42,16 @@ pub fn stats_from_index(repo: &gitx_git::Repository) -> anyhow::Result<Option<In
     Ok(gitx_services::RepositoryService::new(repo)
         .stats_from_index()?
         .map(|s| IndexStats {
-        commits: s.commits,
-        contributors: s.contributors,
-        files: s.files,
-        branches: s.branches,
-        tags: s.tags,
-        age_days: s.age_days,
-        first_commit: s.first_commit,
-        latest_commit: s.latest_commit,
-        languages: s.languages,
-    }))
+            commits: s.commits,
+            contributors: s.contributors,
+            files: s.files,
+            branches: s.branches,
+            tags: s.tags,
+            age_days: s.age_days,
+            first_commit: s.first_commit,
+            latest_commit: s.latest_commit,
+            languages: s.languages,
+        }))
 }
 
 pub fn scan(cli: &Cli) -> anyhow::Result<()> {

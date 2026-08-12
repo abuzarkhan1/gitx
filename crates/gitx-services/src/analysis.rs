@@ -3,7 +3,7 @@
 
 use crate::repository::default_index_path;
 use gitx_analysis::hotspots::HotspotWeights;
-use gitx_analysis::{RepoAnalysis, RegressionReport};
+use gitx_analysis::{RegressionReport, RepoAnalysis};
 use gitx_git::Repository;
 
 pub struct AnalysisService<'a> {
@@ -19,10 +19,12 @@ impl<'a> AnalysisService<'a> {
     /// cache exists in the index, results are read from SQLite (docs/13 §3);
     /// otherwise the pipeline computes live from Git. `weights` only apply to
     /// the live path.
-    pub fn analyze(&self, use_cache: bool, weights: HotspotWeights) -> anyhow::Result<RepoAnalysis> {
-        if use_cache
-            && let Some(a) = self.analysis_from_cache()?
-        {
+    pub fn analyze(
+        &self,
+        use_cache: bool,
+        weights: HotspotWeights,
+    ) -> anyhow::Result<RepoAnalysis> {
+        if use_cache && let Some(a) = self.analysis_from_cache()? {
             return Ok(a);
         }
         gitx_analysis::analyze_repository_with(self.repo, weights)

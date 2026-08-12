@@ -9,14 +9,9 @@ use std::cell::RefCell;
 use std::sync::atomic::AtomicBool;
 
 /// Console progress reporting to stderr (docs/09 §8); stdout stays clean.
+#[derive(Default)]
 pub struct ConsoleProgress {
     last_report: usize,
-}
-
-impl Default for ConsoleProgress {
-    fn default() -> Self {
-        Self { last_report: 0 }
-    }
 }
 
 impl ProgressReporter for ConsoleProgress {
@@ -51,11 +46,7 @@ impl<'a> IndexService<'a> {
         self.scan_with(incremental, &AtomicBool::new(false))
     }
 
-    pub fn scan_with(
-        &self,
-        incremental: bool,
-        cancelled: &AtomicBool,
-    ) -> anyhow::Result<u64> {
+    pub fn scan_with(&self, incremental: bool, cancelled: &AtomicBool) -> anyhow::Result<u64> {
         let path = self.index_path();
         let conn = gitx_storage::open_indexed(&path)?;
         let storage = gitx_storage::SqliteStorageProvider::new(&conn);
@@ -190,10 +181,7 @@ impl<'a> IndexService<'a> {
 /// Build a fully-populated GitX index (commits, parents, files, branches,
 /// tags, authors) into `conn`. Used by `rebuild` (persisted) and by `gitx
 /// search` (in-memory). FTS5 search tables are populated by triggers.
-pub fn build_index(
-    conn: &mut rusqlite::Connection,
-    repo: &Repository,
-) -> anyhow::Result<()> {
+pub fn build_index(conn: &mut rusqlite::Connection, repo: &Repository) -> anyhow::Result<()> {
     gitx_storage::migrations::apply_migrations(conn)?;
 
     let head = repo
