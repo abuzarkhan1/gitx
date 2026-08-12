@@ -781,6 +781,30 @@ clippy `-D warnings` clean, `cargo fmt` clean.
   (badges, install paths, command tour, dashboard screenshot via
   `scripts/ansi-to-png.py`).
 
+## Ninth implementation pass (large-repo validation, all verified)
+
+Dogfooded against a real 9,070-commit clone (`clap`); timings in
+`benches/RESULTS.md`. Three fixes closed O(history) costs that the
+auto-refresh default exposed at scale; **45/45 PTY checks**, full workspace
+suite green, clippy `-D warnings` clean.
+
+- **gix decoded-object cache (docs/13 §4)** — `gitx_git::Repository` sets a
+  128 MB memory-capped object cache (gix defaults to none), so walks stop
+  re-decompressing pack objects: first-run `gitx health` on 9k commits went
+  60 s → 3.7 s; no-op `gitx refresh` 16.5 s → 0.03 s.
+- **Boundary-stop incremental walk (docs/13 §3)** — `walk_commits` now
+  receives the indexed oid set and never descends into (or reads from the
+  object database) commits already in the index: refresh is O(new commits).
+  Rewritten-history detection was re-derived for the boundary semantics
+  (moved HEAD lineage with no walked parent equal to the old HEAD is
+  flagged; forward moves, untouched refs, and non-HEAD branch changes are
+  not) and stays covered by the existing rewrite test.
+- **Analysis-cache freshness skip** — a no-op refresh no longer re-runs the
+  full live analysis when the cache is already fresh for HEAD. Remaining
+  hot spot (documented): the analysis cache is keyed to HEAD, so the first
+  command after a new commit still recomputes analysis in O(history)
+  (~3 s on 9k commits); an incremental analysis cache is future work.
+
 ## Deliberate non-goals preserved
 
 No AI, no network, no accounts: everything added is deterministic repository
