@@ -111,11 +111,41 @@ gitx-tui --version
 gitx completions bash > /tmp/gitx.bash   # optional, see below
 ```
 
-### Package-manager installation (later)
+### Package-manager installation
 
-Package-manager distribution (Homebrew formula, cargo-dist installers) is
-planned but not yet published; see docs/27 §3 and docs/26 for status. Until
-then, use the binary download or a source build below.
+Tagged releases publish cargo-dist installers alongside the archives (docs/27
+checklist step 4). The exact URLs follow the repository owner; with the
+`USER` placeholder used throughout this doc:
+
+- **curl installer (macOS/Linux):**
+
+  ```bash
+  curl -LsSf https://github.com/USER/gitx/releases/latest/download/gitx-installer.sh | sh
+  ```
+
+- **PowerShell installer (Windows):**
+
+  ```powershell
+  irm https://github.com/USER/gitx/releases/latest/download/gitx-installer.ps1 | iex
+  ```
+
+- **Homebrew:** cargo-dist publishes a tap at `github.com/USER/homebrew-gitx`;
+  install both binaries with:
+
+  ```bash
+  brew install USER/gitx/gitx
+  ```
+
+- **Cargo (source build):**
+
+  ```bash
+  cargo install --path crates/gitx-cli --locked
+  cargo install --path crates/gitx-tui --locked
+  ```
+
+Verify any install with `gitx --version` and `gitx-tui --version`, and
+regenerate the plan before a release with `cargo dist plan` so the installer
+URLs stay accurate (docs/27 checklist).
 
 ### Source build
 

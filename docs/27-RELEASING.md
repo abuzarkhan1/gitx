@@ -30,8 +30,13 @@ detected → explained → migrated or rebuilt, never silently reinterpreted.
 5. **Verify the release** — the GitHub Release contains, per platform:
    the `gitx` and `gitx-tui` binaries, `checksums.txt`, and release notes
    (docs/18 §5).
-6. **Document installation** — keep `README.md` and `docs/22-CONTRIBUTING.md`
-   current: binary download, source build, shell completions.
+6. **Installers** — run `cargo dist plan` (requires `cargo install
+   cargo-dist`) and confirm the shell/powershell/homebrew installers are
+   listed; copy the generated install commands into docs/18 §9 if the tap or
+   URL shape changed.
+7. **Document installation** — keep `README.md`, `docs/18 §9` and
+   `docs/22-CONTRIBUTING.md` current: binary download, package-manager
+   installers, source build, shell completions.
 
 ## Local dry run
 
