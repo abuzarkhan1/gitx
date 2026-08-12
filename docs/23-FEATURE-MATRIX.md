@@ -34,9 +34,10 @@
 Notes:
 
 - Language symbols use the deterministic line-based extractor
-  (`gitx symbols`, docs/21 Stage 6) — **not** Tree-sitter. Tree-sitter remains
-  optional (ADR-011, Proposed): the `gitx-graph` parser is still a no-op
-  placeholder and nothing consumes it.
+  (`gitx symbols`, docs/21 Stage 6) — **not** Tree-sitter. Tree-sitter is
+  deferred (ADR-011, Accepted-deferred, with revisit criteria); the former
+  `gitx-graph` parser placeholder was removed because nothing consumed it.
+  Call edges in `gitx graph` are heuristic (`name(` scans), not AST-level.
 - Code-content search is bounded to the working tree with a HEAD-tree
   fallback (docs/11 §5) and is not part of the persisted index.
 

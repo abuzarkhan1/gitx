@@ -178,7 +178,7 @@ Repository intelligence should be safe by default.
 
 ### Status
 
-Proposed
+Accepted (deferred)
 
 ### Decision
 
@@ -187,3 +187,16 @@ Use Tree-sitter adapters for language-aware analysis when the base repository/fi
 ### Reason
 
 Language-aware symbols and structural complexity are valuable, but should not complicate the core Git engine.
+
+### Status note (2026-08-12)
+
+Deferred. The deterministic line-based extractor (`gitx_analysis::symbols`)
+already covers function/method/struct/class/enum/const symbols across 10+
+languages and feeds search, symbol history, and the complexity signal; the
+shared HEAD-graph builder adds heuristic import/call edges. A Tree-sitter
+adapter would add a heavy native dependency for marginal gain against the
+feature-freeze principle. Revisit when: (a) call-graph accuracy needs
+AST-level resolution beyond the heuristic `name(` scan, or (b) a specific
+language's extractor proves unreliable in practice. The former
+`gitx-graph::treesitter` placeholder was removed because nothing consumed
+it (docs/26, seventh pass).

@@ -430,4 +430,15 @@ const MAX: usize = 10;
     fn function_count_zero_for_unsupported_language() {
         assert_eq!(function_count("def f(): pass", "plaintext"), 0);
     }
+
+    #[test]
+    fn default_symbol_extraction_is_heuristic() {
+        // Locks the default: no Tree-sitter adapter is wired (ADR-011
+        // deferred); the deterministic line-based extractor is the
+        // implementation. Starts failing only if a different default lands.
+        let src = "pub fn a() {}\nfn b() {}\n";
+        let syms = extract_symbols(src, "rust");
+        assert_eq!(syms.len(), 2);
+        assert!(syms.iter().all(|s| matches!(s.kind.as_str(), "Function")));
+    }
 }
