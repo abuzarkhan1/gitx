@@ -2,15 +2,21 @@
 name = "gitx-services"
 version = "0.1.0"
 edition = "2024"
+authors = ["GitX Contributors"]
+license = "MIT"
+repository = "https://github.com/abuzarkhan1/gitx"
+keywords = ["git", "history", "analysis", "cli", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+description = "Application service layer over repository, index, analysis, search, recovery, history"
 
 [dependencies]
-gitx-core = { path = "../gitx-core" }
-gitx-git = { path = "../gitx-git" }
-gitx-history = { path = "../gitx-history" }
-gitx-analysis = { path = "../gitx-analysis" }
-gitx-index = { path = "../gitx-index" }
-gitx-search = { path = "../gitx-search" }
-gitx-storage = { path = "../gitx-storage" }
+gitx-core = { version = "0.1.0", path = "../gitx-core" }
+gitx-git = { version = "0.1.0", path = "../gitx-git" }
+gitx-history = { version = "0.1.0", path = "../gitx-history" }
+gitx-analysis = { version = "0.1.0", path = "../gitx-analysis" }
+gitx-index = { version = "0.1.0", path = "../gitx-index" }
+gitx-search = { version = "0.1.0", path = "../gitx-search" }
+gitx-storage = { version = "0.1.0", path = "../gitx-storage" }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -2,9 +2,15 @@
 name = "gitx-storage"
 version = "0.1.0"
 edition = "2021"
+authors = ["GitX Contributors"]
+license = "MIT"
+repository = "https://github.com/abuzarkhan1/gitx"
+keywords = ["git", "history", "analysis", "cli", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+description = "SQLite schema, migrations, and storage providers"
 
 [dependencies]
 rusqlite = { workspace = true }
-gitx-index = { path = "../gitx-index" }
+gitx-index = { version = "0.1.0", path = "../gitx-index" }
 thiserror = { workspace = true }
 tracing = { workspace = true }

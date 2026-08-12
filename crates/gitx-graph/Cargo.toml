@@ -2,6 +2,12 @@
 name = "gitx-graph"
 version = "0.1.0"
 edition = "2024"
+authors = ["GitX Contributors"]
+license = "MIT"
+repository = "https://github.com/abuzarkhan1/gitx"
+keywords = ["git", "history", "analysis", "cli", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+description = "Code-graph and structural snapshot comparison"
 
 [dependencies]
 anyhow.workspace = true
@@ -9,5 +15,5 @@ petgraph.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-gitx-git = { path = "../gitx-git" }
-gitx-analysis = { path = "../gitx-analysis" }
+gitx-git = { version = "0.1.0", path = "../gitx-git" }
+gitx-analysis = { version = "0.1.0", path = "../gitx-analysis" }

@@ -2,21 +2,27 @@
 name = "gitx-cli"
 version = "0.1.0"
 edition = "2024"
+authors = ["GitX Contributors"]
+license = "MIT"
+repository = "https://github.com/abuzarkhan1/gitx"
+keywords = ["git", "history", "analysis", "cli", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+description = "GitX command-line interface (binary `gitx`)"
 
 [[bin]]
 name = "gitx"
 path = "src/main.rs"
 
 [dependencies]
-gitx-core = { path = "../gitx-core" }
-gitx-git = { path = "../gitx-git" }
-gitx-history = { path = "../gitx-history" }
-gitx-analysis = { path = "../gitx-analysis" }
-gitx-graph = { path = "../gitx-graph" }
-gitx-index = { path = "../gitx-index" }
-gitx-search = { path = "../gitx-search" }
-gitx-services = { path = "../gitx-services" }
-gitx-storage = { path = "../gitx-storage" }
+gitx-core = { version = "0.1.0", path = "../gitx-core" }
+gitx-git = { version = "0.1.0", path = "../gitx-git" }
+gitx-history = { version = "0.1.0", path = "../gitx-history" }
+gitx-analysis = { version = "0.1.0", path = "../gitx-analysis" }
+gitx-graph = { version = "0.1.0", path = "../gitx-graph" }
+gitx-index = { version = "0.1.0", path = "../gitx-index" }
+gitx-search = { version = "0.1.0", path = "../gitx-search" }
+gitx-services = { version = "0.1.0", path = "../gitx-services" }
+gitx-storage = { version = "0.1.0", path = "../gitx-storage" }
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }
 clap_complete = "4.5"

@@ -2,10 +2,16 @@
 name = "gitx-history"
 version = "0.1.0"
 edition = "2024"
+authors = ["GitX Contributors"]
+license = "MIT"
+repository = "https://github.com/abuzarkhan1/gitx"
+keywords = ["git", "history", "analysis", "cli", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+description = "Timeline, lineage, and line-level blame engines"
 
 [dependencies]
-gitx-core = { path = "../gitx-core" }
-gitx-git = { path = "../gitx-git" }
+gitx-core = { version = "0.1.0", path = "../gitx-core" }
+gitx-git = { version = "0.1.0", path = "../gitx-git" }
 gix = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

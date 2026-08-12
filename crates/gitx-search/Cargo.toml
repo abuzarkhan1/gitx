@@ -2,9 +2,15 @@
 name = "gitx-search"
 version = "0.1.0"
 edition = "2021"
+authors = ["GitX Contributors"]
+license = "MIT"
+repository = "https://github.com/abuzarkhan1/gitx"
+keywords = ["git", "history", "analysis", "cli", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+description = "Full-text and code-content search across the persisted index"
 
 [dependencies]
-gitx-git = { path = "../gitx-git" }
+gitx-git = { version = "0.1.0", path = "../gitx-git" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

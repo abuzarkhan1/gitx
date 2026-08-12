@@ -2,6 +2,12 @@
 name = "gitx-tui"
 version = "0.1.0"
 edition = "2024"
+authors = ["GitX Contributors"]
+license = "MIT"
+repository = "https://github.com/abuzarkhan1/gitx"
+keywords = ["git", "history", "analysis", "cli", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+description = "GitX interactive terminal dashboard (binary `gitx-tui`)"
 
 [[bin]]
 name = "gitx-tui"
@@ -15,13 +21,13 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-gitx-core = { path = "../gitx-core" }
-gitx-git = { path = "../gitx-git" }
-gitx-history = { path = "../gitx-history" }
-gitx-graph = { path = "../gitx-graph" }
-gitx-analysis = { path = "../gitx-analysis" }
-gitx-services = { path = "../gitx-services" }
-gitx-storage = { path = "../gitx-storage" }
+gitx-core = { version = "0.1.0", path = "../gitx-core" }
+gitx-git = { version = "0.1.0", path = "../gitx-git" }
+gitx-history = { version = "0.1.0", path = "../gitx-history" }
+gitx-graph = { version = "0.1.0", path = "../gitx-graph" }
+gitx-analysis = { version = "0.1.0", path = "../gitx-analysis" }
+gitx-services = { version = "0.1.0", path = "../gitx-services" }
+gitx-storage = { version = "0.1.0", path = "../gitx-storage" }
 rusqlite = { workspace = true }
 chrono = { version = "0.4.34" }
 futures = "0.3.33"

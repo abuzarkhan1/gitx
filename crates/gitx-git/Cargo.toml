@@ -4,10 +4,14 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Git object, ref, diff, and reflog access via gix"
 
 [dependencies]
 gix = { workspace = true }
-gitx-index = { path = "../gitx-index" }
+gitx-index = { version = "0.1.0", path = "../gitx-index" }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

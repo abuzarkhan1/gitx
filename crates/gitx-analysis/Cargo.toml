@@ -2,11 +2,17 @@
 name = "gitx-analysis"
 version = "0.1.0"
 edition = "2024"
+authors = ["GitX Contributors"]
+license = "MIT"
+repository = "https://github.com/abuzarkhan1/gitx"
+keywords = ["git", "history", "analysis", "cli", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
+description = "Deterministic repository intelligence: hotspots, risk, health, ownership, dependencies, symbols"
 
 [dependencies]
-gitx-core = { path = "../gitx-core" }
-gitx-git = { path = "../gitx-git" }
-gitx-history = { path = "../gitx-history" }
+gitx-core = { version = "0.1.0", path = "../gitx-core" }
+gitx-git = { version = "0.1.0", path = "../gitx-git" }
+gitx-history = { version = "0.1.0", path = "../gitx-history" }
 anyhow = { workspace = true }
 chrono = { version = "0.4.34", features = ["serde"] }
 rayon = "1.10"
