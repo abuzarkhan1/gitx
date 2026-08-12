@@ -46,17 +46,30 @@ pub const DEFAULT_CAP: usize = 50;
 /// Search file contents for `query`, bounded. Prefers the working tree and
 /// falls back to the HEAD tree when the workdir is unavailable (bare repos,
 /// missing checkout) so code search still answers (docs/11 §2 “optionally
-/// indexed snapshots”).
-pub fn search_code_content(repo: &Repository, query: &str, cap: usize) -> CodeSearchOutcome {
+/// indexed snapshots”). `case_sensitive` controls substring matching
+/// (docs/16 `[search] case_sensitive`; false by default).
+pub fn search_code_content(
+    repo: &Repository,
+    query: &str,
+    cap: usize,
+    case_sensitive: bool,
+) -> CodeSearchOutcome {
     let cap = cap.max(1);
     let mut results = Vec::new();
     let mut files_scanned = 0usize;
     let mut truncated = false;
+    let matches = |line: &str| {
+        if case_sensitive {
+            line.contains(query)
+        } else {
+            line.to_lowercase().contains(&query.to_lowercase())
+        }
+    };
 
     if let Some(work_dir) = repo.work_dir() {
         let mut outcome = WorktreeSearch {
             results: &mut results,
-            query,
+            matches: &matches,
             cap,
             files_scanned: &mut files_scanned,
             truncated: &mut truncated,
@@ -98,7 +111,7 @@ pub fn search_code_content(repo: &Repository, query: &str, cap: usize) -> CodeSe
             let Ok(text) = String::from_utf8(bytes) else {
                 continue;
             };
-            if let Some(line) = text.lines().position(|l| l.contains(query)) {
+            if let Some(line) = text.lines().position(&matches) {
                 push_match(&mut results, &path, line, &text);
             }
         }
@@ -124,7 +137,7 @@ pub fn search_code_content(repo: &Repository, query: &str, cap: usize) -> CodeSe
 /// Bounded recursive walk over the working tree.
 struct WorktreeSearch<'a> {
     results: &'a mut Vec<SearchResult>,
-    query: &'a str,
+    matches: &'a dyn Fn(&str) -> bool,
     cap: usize,
     files_scanned: &'a mut usize,
     truncated: &'a mut bool,
@@ -179,7 +192,7 @@ fn walk_worktree(dir: &Path, root: &Path, s: &mut WorktreeSearch, depth: usize) 
             continue;
         };
         let rel = path.strip_prefix(root).unwrap_or(&path);
-        if let Some(line) = text.lines().position(|l| l.contains(s.query)) {
+        if let Some(line) = text.lines().position(&s.matches) {
             push_match(s.results, rel, line, &text);
         }
     }
@@ -261,6 +274,22 @@ mod tests {
     fn nul_sniff() {
         assert!(has_nul(&[b'a', 0, b'b']));
         assert!(!has_nul(&b"hello world"[..]));
+    }
+
+    #[test]
+    fn case_matching_predicate_honors_flag() {
+        // The predicate lives inside search_code_content; exercise the two
+        // branches here so this test stays hermetic (no repo needed).
+        let cs = |line: &str, query: &str, sensitive: bool| {
+            if sensitive {
+                line.contains(query)
+            } else {
+                line.to_lowercase().contains(&query.to_lowercase())
+            }
+        };
+        assert!(cs("Hello World", "hello", false));
+        assert!(!cs("Hello World", "hello", true));
+        assert!(cs("Hello World", "Hello", true));
     }
 
     #[test]

@@ -589,6 +589,13 @@ impl App {
                 .ok()
                 .map(|r| {
                     let service = gitx_services::SearchService::new(&r);
+                    // `[search] case_sensitive` (docs/16): FTS is
+                    // case-insensitive; the service post-filters exact-case
+                    // hits when the option is on.
+                    let case_sensitive = gitx_core::config::Config::default_path()
+                        .and_then(|p| gitx_core::config::Config::load(&p).ok())
+                        .map(|c| c.search.case_sensitive)
+                        .unwrap_or(false);
                     let options = gitx_services::SearchOptions {
                         commits: true,
                         files: true,
@@ -599,6 +606,7 @@ impl App {
                         symbols: true,
                         directories: true,
                         code: true,
+                        case_sensitive,
                         ..Default::default()
                     };
                     service

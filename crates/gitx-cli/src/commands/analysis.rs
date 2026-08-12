@@ -319,13 +319,25 @@ pub fn ownership(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
 /// instead of recomputing live from Git (docs/16 `[index] auto_refresh`,
 /// docs/13 §3).
 fn analyze(cli: &Cli, repo: &gitx_git::Repository) -> anyhow::Result<gitx_analysis::RepoAnalysis> {
+    let config = crate::commands::config::load_config_for(cli, repo)?;
+    if !config.index.enabled {
+        // `[index] enabled = false` → never read the persisted index
+        // (docs/16 §3): always compute live, like `--no-cache`.
+        return gitx_analysis::analyze_repository_with(repo, weights(cli));
+    }
     crate::commands::ensure_fresh_index(cli, repo)?;
     gitx_services::AnalysisService::new(repo).analyze(!cli.no_cache, weights(cli))
 }
 
-pub fn hotspots(cli: &Cli, limit: usize, path: Option<&str>) -> anyhow::Result<()> {
+pub fn hotspots(cli: &Cli, limit: Option<usize>, path: Option<&str>) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
     let analysis = analyze(cli, &repo)?;
+    // `--limit` wins; otherwise the `[general] default_limit` (docs/16).
+    let limit = limit.unwrap_or_else(|| {
+        crate::commands::config::load_config_for(cli, &repo)
+            .map(|c| c.general.default_limit)
+            .unwrap_or(50)
+    });
 
     let files: Vec<&FileAnalysis> = analysis
         .files
@@ -402,13 +414,15 @@ pub fn risk(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
     let analysis = analyze(cli, &repo)?;
 
+    let config = crate::commands::config::load_config_for(cli, &repo)?;
+    let limit = config.general.default_limit;
     let files: Vec<&FileAnalysis> = match path {
         Some(p) => analysis
             .files
             .iter()
             .filter(|f| f.path == std::path::Path::new(p) || f.path.starts_with(p))
             .collect(),
-        None => analysis.files.iter().take(20).collect(),
+        None => analysis.files.iter().take(limit).collect(),
     };
 
     if files.is_empty() {

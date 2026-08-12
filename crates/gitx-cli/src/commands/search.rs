@@ -24,6 +24,11 @@ pub fn search(
     author: Option<String>,
 ) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
+    // `[search] case_sensitive` (docs/16): FTS matching is case-insensitive,
+    // so when case sensitivity is requested the hits are post-filtered.
+    let case_sensitive = crate::commands::config::load_config_for(cli, &repo)?
+        .search
+        .case_sensitive;
 
     // `--since`/`--until` are commit-level filters; normalize to unix seconds
     // so the SQLite backend can compare directly (docs/11 §4).
@@ -65,7 +70,7 @@ pub fn search(
     // for bare repositories (docs/11 §2). Results are capped at 50.
     let mut code_note: Option<String> = None;
     if code {
-        let outcome = gitx_search::search_code_content(&repo, query, 50);
+        let outcome = gitx_search::search_code_content(&repo, query, 50, case_sensitive);
         results.extend(outcome.results);
         code_note = Some(format!(
             "code content searched in the {} ({} file(s) scanned)",
@@ -74,6 +79,16 @@ pub fn search(
         if outcome.truncated {
             code_note = code_note.map(|n| format!("{n}; capped at 50 matches"));
         }
+    }
+
+    // Exact-case post-filter for the FTS-backed scopes (docs/16
+    // `[search] case_sensitive`).
+    if case_sensitive {
+        results.retain(|r| {
+            r.display_name.contains(query)
+                || r.id.contains(query)
+                || r.match_context.as_deref().unwrap_or("").contains(query)
+        });
     }
 
     if cli.json {

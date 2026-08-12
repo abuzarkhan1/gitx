@@ -29,6 +29,10 @@ pub struct SearchOptions {
     /// Code content, bounded to the working tree with a HEAD-tree fallback
     /// (docs/11 §4–§5: never stream every historical blob).
     pub code: bool,
+    /// Case-sensitive matching for FTS-backed scopes and code content
+    /// (docs/16 `[search] case_sensitive`). FTS5 is case-insensitive by
+    /// default; when true, hits are post-filtered for an exact-case match.
+    pub case_sensitive: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -266,7 +270,8 @@ impl<'a> SearchService<'a> {
         // cap (50) keeps it fast and honest; the raw term is used (not the
         // FTS-escaped query) because this is plain substring matching.
         if options.code && !raw.trim().is_empty() {
-            let outcome = gitx_search::search_code_content(self.repo, raw.trim(), 50);
+            let outcome =
+                gitx_search::search_code_content(self.repo, raw.trim(), 50, options.case_sensitive);
             for r in outcome.results {
                 hits.push(SearchHit {
                     scope: "code".into(),
@@ -275,6 +280,16 @@ impl<'a> SearchService<'a> {
                     detail: r.match_context.unwrap_or_default(),
                 });
             }
+        }
+
+        // `[search] case_sensitive` (docs/16): FTS5 matching is
+        // case-insensitive, so when case sensitivity is requested the hits
+        // are filtered to those carrying the exact-case term.
+        if options.case_sensitive {
+            let term = raw.trim();
+            hits.retain(|h| {
+                h.title.contains(term) || h.id.contains(term) || h.detail.contains(term)
+            });
         }
 
         Ok(hits)

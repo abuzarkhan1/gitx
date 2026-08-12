@@ -76,6 +76,13 @@ fn run_indexer(cli: &Cli, incremental: bool) -> anyhow::Result<()> {
     install_cancel_handler();
     CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
     let repo = open_repo(cli)?;
+    // `[index] enabled = false` (docs/16 §3): scan/refresh are a deliberate
+    // no-op so nothing is written, and analysis stays live.
+    let config = crate::commands::config::load_config_for(cli, &repo)?;
+    if !config.index.enabled {
+        println!("indexing is disabled ([index] enabled = false); skipping");
+        return Ok(());
+    }
     let service = IndexService::new(&repo);
     let path = service.index_path();
     tracing::info!(incremental, path = %path.display(), "indexer start");

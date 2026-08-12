@@ -44,7 +44,11 @@ vim_keys = true
 case_sensitive = false
 ```
 
-Exact keys should be finalized during implementation.
+All keys are honored: `default_limit` caps the top-N list commands
+(`hotspots`, `risk`); `index.enabled` makes `scan`/`refresh` no-ops and
+forces live analysis; `index.auto_refresh` builds a stale index before the
+first index-backed command (docs/09); `ui.vim_keys` gates j/k/h/l in the
+dashboard; `search.case_sensitive` post-filters FTS hits and code search.
 
 ## 4. Configuration precedence
 

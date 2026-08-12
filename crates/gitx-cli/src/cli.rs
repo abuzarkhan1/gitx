@@ -137,9 +137,9 @@ pub enum Commands {
     },
     /// Change/maintenance hotspots (highest-risk files first).
     Hotspots {
-        /// Show at most N files.
-        #[arg(long, default_value_t = 20)]
-        limit: usize,
+        /// Show at most N files (default: `[general] default_limit`).
+        #[arg(long)]
+        limit: Option<usize>,
         /// Restrict to a path prefix.
         #[arg(long)]
         path: Option<String>,

@@ -87,6 +87,73 @@ fn auto_refresh_false_skips_index_build() {
 }
 
 #[test]
+fn index_disabled_skips_scan_and_forces_live_analysis() {
+    let Some(repo) = FixtureRepo::new("product-indexdisabled") else {
+        return;
+    };
+    repo.write("README.md", "# demo\n");
+    repo.commit("docs: readme");
+    std::fs::write(repo.path().join("gitx.toml"), "[index]\nenabled = false\n")
+        .expect("write repo config");
+
+    let out = Command::new(bin())
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("scan")
+        .output()
+        .expect("gitx scan runs");
+    assert!(out.status.success(), "scan must succeed with a message");
+    assert!(
+        !repo.path().join(".git/gitx/index.sqlite").exists(),
+        "index.enabled=false must not create an index"
+    );
+
+    let out = Command::new(bin())
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("stats")
+        .output()
+        .expect("gitx stats runs");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("source: live"),
+        "stats must be labeled live when the index is disabled: {text}"
+    );
+}
+
+#[test]
+fn default_limit_applies_to_hotspots() {
+    let Some(repo) = FixtureRepo::new("product-defaultlimit") else {
+        return;
+    };
+    for i in 0..10 {
+        repo.write(&format!("src/f{i}.rs"), "pub fn x() {}\n");
+        repo.commit(&format!("feat: file {i}"));
+    }
+    std::fs::write(
+        repo.path().join("gitx.toml"),
+        "[general]\ndefault_limit = 3\n",
+    )
+    .expect("write repo config");
+
+    let out = Command::new(bin())
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("hotspots")
+        .output()
+        .expect("gitx hotspots runs");
+    let text = String::from_utf8_lossy(&out.stdout);
+    let rows = text
+        .lines()
+        .filter(|l| l.trim_start().starts_with(|c: char| c.is_ascii_digit()))
+        .count();
+    assert_eq!(
+        rows, 3,
+        "hotspots should honor default_limit=3 rows, got {rows}:\n{text}"
+    );
+}
+
+#[test]
 fn gitx_with_no_args_on_a_pipe_prints_a_snapshot() {
     let Some(repo) = FixtureRepo::new("product-noarg") else {
         return;
