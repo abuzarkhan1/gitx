@@ -1,6 +1,7 @@
 use crate::timeline::HistoryService;
+use gitx_git::Repository;
 use gitx_git::models::ObjectId;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// One step in a file's life, newest first.
 #[derive(Debug, Clone)]
@@ -14,7 +15,12 @@ pub struct FileLineageNode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileAction {
-    Added,
+    /// The file appeared. `copy_of` is set when the added blob is identical
+    /// to an existing file's blob in the same tree (docs/02 §2 “copies where
+    /// reliably detectable”).
+    Added {
+        copy_of: Option<PathBuf>,
+    },
     Modified,
     Deleted,
     /// The file was renamed `from → path` by this commit.
@@ -55,13 +61,16 @@ impl HistoryService<'_> {
             let commit_id = commit_id_res?;
             let commit = self.repo.find_commit(commit_id)?;
 
-            // Root commit: the file exists in this tree → Added (its birth).
+            // Root commit: the file exists in this tree → Added (its birth),
+            // possibly copied from an existing file with identical content.
             if commit.parents.is_empty() {
                 if self.repo.blob_at_path(commit.tree_id, &current)?.is_some() {
                     history.push(FileLineageNode {
                         commit_id,
                         path: current.clone(),
-                        action: FileAction::Added,
+                        action: FileAction::Added {
+                            copy_of: copy_source(self.repo, commit.tree_id, &current),
+                        },
                     });
                 }
                 break;
@@ -100,7 +109,9 @@ impl HistoryService<'_> {
                         history.push(FileLineageNode {
                             commit_id,
                             path: current.clone(),
-                            action: FileAction::Added,
+                            action: FileAction::Added {
+                                copy_of: copy_source(self.repo, commit.tree_id, &current),
+                            },
                         });
                     }
                     gitx_git::models::ChangeType::Deleted if change.path == current => {
@@ -129,4 +140,17 @@ impl HistoryService<'_> {
 
         Ok(FileLineage { history })
     }
+}
+
+/// When `path`'s blob in `tree_id` is byte-identical (same oid) to another
+/// file in the same tree, that other path is a reliable copy source
+/// (docs/02 §2 “copies where reliably detectable”; deterministic, read-only).
+fn copy_source(repo: &Repository, tree_id: ObjectId, path: &Path) -> Option<PathBuf> {
+    let entries = repo.tree_entries(tree_id).ok()?;
+    let own = entries.iter().find(|(p, _)| p == path).map(|(_, o)| o)?;
+    entries
+        .iter()
+        .filter(|(p, _)| p != path)
+        .find(|(_, o)| o == own)
+        .map(|(p, _)| p.clone())
 }

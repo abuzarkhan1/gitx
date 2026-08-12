@@ -1,11 +1,8 @@
 use crate::cli::Cli;
 use crate::commands::index::build_index;
 use crate::commands::{open_repo, print_json};
-use gitx_search::{
-    EntityType, SearchFilters, SearchOrchestrator, SearchQuery, SearchResult, SqliteSearchBackend,
-};
+use gitx_search::{SearchFilters, SearchOrchestrator, SearchQuery, SqliteSearchBackend};
 use serde_json::json;
-use std::path::Path;
 
 #[allow(clippy::too_many_arguments)]
 pub fn search(
@@ -20,6 +17,8 @@ pub fn search(
     renames: bool,
     code: bool,
     history: bool,
+    symbols: bool,
+    directories: bool,
     author: Option<String>,
 ) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
@@ -43,6 +42,8 @@ pub fn search(
         renames,
         code: false, // code content is searched below, against the worktree
         history,
+        symbols,
+        directories,
         since,
         author,
     };
@@ -52,10 +53,20 @@ pub fn search(
     let orchestrator = SearchOrchestrator::new(backend);
     let mut results = orchestrator.search(&search_query)?;
 
-    // `--code` searches file contents, bounded to the current working tree
-    // (docs/11 §4–§5: never stream every historical blob).
+    // `--code` searches file contents, bounded (docs/11 §4–§5: never stream
+    // every historical blob): the working tree, falling back to the HEAD tree
+    // for bare repositories (docs/11 §2). Results are capped at 50.
+    let mut code_note: Option<String> = None;
     if code {
-        results.extend(search_code(&repo, query)?);
+        let outcome = gitx_search::search_code_content(&repo, query, 50);
+        results.extend(outcome.results);
+        code_note = Some(format!(
+            "code content searched in the {} ({} file(s) scanned)",
+            outcome.source, outcome.files_scanned
+        ));
+        if outcome.truncated {
+            code_note = code_note.map(|n| format!("{n}; capped at 50 matches"));
+        }
     }
 
     if cli.json {
@@ -78,108 +89,10 @@ pub fn search(
         println!("[{kind:<7}] {}", result.display_name);
     }
     println!("{} result(s)", results.len());
+    if let Some(note) = code_note {
+        // Bound note (docs/11 §5): code search never streams history, and a
+        // cap is called out so the user knows results may be partial.
+        println!("note: {note}");
+    }
     Ok(())
-}
-
-/// Substring search over the working tree, bounded: `.git` and binary files
-/// are skipped, results are capped (docs/11 §5 code-content bounds).
-fn search_code(repo: &gitx_git::Repository, query: &str) -> anyhow::Result<Vec<SearchResult>> {
-    let mut results = Vec::new();
-    let Some(work_dir) = repo.work_dir() else {
-        return Ok(results);
-    };
-    if query.trim().is_empty() {
-        return Ok(results);
-    }
-
-    // A tiny, dependency-free walker (ignores `.git` by construction; hidden
-    // dirs are skipped to stay fast and bounded).
-    fn walk(dir: &Path, root: &Path, query: &str, results: &mut Vec<SearchResult>, depth: usize) {
-        if depth > 12 || results.len() >= 50 {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            if results.len() >= 50 {
-                break;
-            }
-            let path = entry.path();
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            // Do not follow symlinks: a symlink could point outside the
-            // repository root (docs/15 §5 symlink traversal defense).
-            let file_type = entry
-                .file_type()
-                .ok()
-                .or_else(|| std::fs::symlink_metadata(&path).map(|m| m.file_type()).ok());
-            let Some(file_type) = file_type else { continue };
-            if file_type.is_symlink() {
-                continue;
-            }
-            if name == ".git" || (name.starts_with('.') && file_type.is_dir()) {
-                continue;
-            }
-            if file_type.is_dir() {
-                walk(&path, root, query, results, depth + 1);
-                continue;
-            }
-            // Skip obvious binary extensions.
-            let binary = path
-                .extension()
-                .map(|e| {
-                    matches!(
-                        e.to_string_lossy().as_ref(),
-                        "png"
-                            | "jpg"
-                            | "jpeg"
-                            | "gif"
-                            | "ico"
-                            | "pdf"
-                            | "zip"
-                            | "gz"
-                            | "tar"
-                            | "wasm"
-                            | "woff"
-                            | "ttf"
-                            | "lock"
-                            | "sqlite"
-                            | "db"
-                    )
-                })
-                .unwrap_or(false);
-            if binary {
-                continue;
-            }
-            let Ok(bytes) = std::fs::read(&path) else {
-                continue;
-            };
-            // Cheap binary sniff: a NUL byte in the first 8 KiB.
-            if bytes.iter().take(8192).any(|&b| b == 0) {
-                continue;
-            }
-            let Ok(text) = String::from_utf8(bytes) else {
-                continue;
-            };
-            let rel = path.strip_prefix(root).unwrap_or(&path);
-            if let Some(line) = text.lines().position(|l| l.contains(query)) {
-                let ctx = text
-                    .lines()
-                    .nth(line)
-                    .map(|l| l.trim().chars().take(120).collect::<String>())
-                    .unwrap_or_default();
-                results.push(SearchResult {
-                    entity_type: EntityType::Code,
-                    id: rel.display().to_string(),
-                    display_name: format!("{}:{line}", rel.display()),
-                    match_context: Some(ctx),
-                    score_if_applicable: None,
-                });
-            }
-        }
-    }
-
-    walk(work_dir, work_dir, query, &mut results, 0);
-    Ok(results)
 }

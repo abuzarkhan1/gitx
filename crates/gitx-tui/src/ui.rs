@@ -15,6 +15,20 @@ use crate::views::theme;
 pub const MIN_WIDTH: u16 = 60;
 pub const MIN_HEIGHT: u16 = 20;
 
+/// Navigation sidebar width for the current terminal width (docs/08 §5
+/// responsive layout): wide terminals get the full nav, narrow ones collapse
+/// it so the content keeps the space. Shared with the mouse handler so a
+/// sidebar click lines up with what is drawn.
+pub fn sidebar_width(total_width: u16) -> u16 {
+    if total_width >= 110 {
+        20
+    } else if total_width >= 80 {
+        16
+    } else {
+        12
+    }
+}
+
 pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
@@ -126,12 +140,13 @@ fn view_label(view: View) -> &'static str {
 }
 
 fn render_main(f: &mut Frame, app: &mut App, area: Rect) {
+    // Collapse the navigation sidebar on narrow terminals (docs/08 §5): the
+    // content area keeps the space, and view-jump keys still reach every view.
+    let width = sidebar_width(area.width);
+    app.width = area.width;
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(20), // Navigation sidebar
-            Constraint::Min(0),     // Content area
-        ])
+        .constraints([Constraint::Length(width), Constraint::Min(0)])
         .split(area);
 
     render_navigation(f, app, chunks[0]);
@@ -157,7 +172,23 @@ fn render_navigation(f: &mut Frame, app: &mut App, area: Rect) {
         "Search",
     ];
 
-    let items: Vec<ListItem> = views.into_iter().map(ListItem::new).collect();
+    // Truncate long labels on narrow terminals so nothing overflows the
+    // collapsed sidebar (docs/08 §5: never silently clip important info —
+    // the full name is one jump-key away).
+    let max_label = area.width.saturating_sub(5) as usize;
+    let items: Vec<ListItem> = views
+        .into_iter()
+        .map(|v| {
+            let label: String = if v.chars().count() > max_label {
+                let mut s: String = v.chars().take(max_label.saturating_sub(1)).collect();
+                s.push('…');
+                s
+            } else {
+                v.to_string()
+            };
+            ListItem::new(label)
+        })
+        .collect();
 
     let mut state = ListState::default();
     state.select(Some(app.nav_index));
@@ -274,8 +305,13 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     if let Some(ref err) = app.error {
-        let err_rect = centered_rect(60, 20, area);
-        let err_p = Paragraph::new(err.as_str())
+        // Structured error overlay (docs/08 §8): the message plus a
+        // reason and an actionable suggestion instead of a bare string.
+        // 42% height fits the full Reason/Suggested-action block even on
+        // short terminals (the block wraps to ~10 rows).
+        let err_rect = centered_rect(72, 42, area);
+        let lines: Vec<Line> = error_overlay_lines(err);
+        let err_p = Paragraph::new(lines)
             .block(Block::default().title(" Error ").borders(Borders::ALL))
             .style(Style::default().fg(Color::Red));
         f.render_widget(err_p, err_rect);
@@ -289,10 +325,17 @@ fn render_status_bar(f: &mut Frame, app: &mut App, area: Rect) {
     let t = theme::global();
     let spinner = spinner_frame(app.load_frame);
     let status = if app.loading {
+        // docs/08 §6: operation name + processed/total + cancellation hint.
         if app.current_view == View::Search {
-            format!(" {spinner} Search is live — repository data still loading... ")
+            format!(
+                " {spinner} {} ({}/{}) — search works while data loads  |  Esc cancel  q quit ",
+                app.load_phase, app.load_step, app.load_total
+            )
         } else {
-            format!(" {spinner} Reloading repository data... | Press 'q' to quit ")
+            format!(
+                " {spinner} {} ({}/{})  |  Esc cancel  q quit ",
+                app.load_phase, app.load_step, app.load_total
+            )
         }
     } else if app.show_help {
         " Esc Close help  q Quit ".to_string()
@@ -304,7 +347,7 @@ fn render_status_bar(f: &mut Frame, app: &mut App, area: Rect) {
     } else if app.current_view == View::Search {
         if app.search_pending {
             format!(
-                " {spinner} Searching index... (FTS over commits, files, authors, branches, tags) "
+                " {spinner} Searching index + code... (commits, files, authors, branches, tags, symbols) "
             )
         } else if app.search_query.trim().is_empty() {
             " Type to search  Enter/← Done  q Quit ".to_string()
@@ -334,6 +377,58 @@ fn render_status_bar(f: &mut Frame, app: &mut App, area: Rect) {
 
     let p = Paragraph::new(status).style(Style::default().bg(t.status_bg).fg(Color::White));
     f.render_widget(p, area);
+}
+
+/// Structured error overlay (docs/08 §8): the raw message under “Reason:”
+/// plus a heuristic “Suggested action:” so errors are actionable. The
+/// heuristic covers the failure modes the CLI/TUI actually hit; anything
+/// unrecognized falls back to the generic refresh-and-retry guidance.
+fn error_overlay_lines(err: &str) -> Vec<Line<'static>> {
+    let reason = err.lines().next().unwrap_or(err).to_string();
+    let suggested = if reason.contains("not inside a Git repository") {
+        "Run GitX from inside a Git repository, or initialize one with `git init`."
+    } else if reason.contains("index") && reason.contains("schema") {
+        "The index was built by a newer GitX. Upgrade GitX, or rebuild it with `gitx refresh`."
+    } else if reason.contains("permission") || reason.contains("denied") {
+        "Check that GitX can read the repository files (file permissions)."
+    } else if reason.contains("lock") {
+        "Another Git process may hold a lock. Close it, then run `gitx refresh`."
+    } else {
+        "Run `gitx refresh` to rebuild the index, or check `gitx --help`."
+    };
+    vec![
+        Line::from(Span::styled(
+            "Unable to complete the operation.",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
+        Line::default(),
+        Line::from(Span::styled(
+            "Reason:",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            format!("  {reason}"),
+            Style::default().fg(Color::White),
+        )),
+        Line::default(),
+        Line::from(Span::styled(
+            "Suggested action:",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            format!("  {suggested}"),
+            Style::default().fg(Color::White),
+        )),
+        Line::default(),
+        Line::from(Span::styled(
+            "  (press Esc to dismiss)",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ]
 }
 
 /// Spinner frames (docs/08 loading progress / #20 async search): animated

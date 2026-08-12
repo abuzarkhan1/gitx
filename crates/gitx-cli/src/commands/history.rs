@@ -83,6 +83,14 @@ pub fn commit(cli: &Cli, oid: &str) -> anyhow::Result<()> {
     let insertions: u32 = changes.iter().map(|c| c.insertions).sum();
     let deletions: u32 = changes.iter().map(|c| c.deletions).sum();
 
+    // Classification (docs/07 §6, docs/10 §7 — explicitly heuristic).
+    let classification = gitx_analysis::classify_commit_message(&commit.message);
+    let class_label = classification_label(&classification);
+
+    // Related history + affected contributors (docs/07 §6): a bounded walk
+    // over the newest commits, ranking others by changed-file overlap.
+    let (related, contributors) = related_history(&repo, &id, &changes, 200);
+
     if cli.json {
         return print_json(&json!({
             "oid": commit.id.to_string(),
@@ -91,6 +99,8 @@ pub fn commit(cli: &Cli, oid: &str) -> anyhow::Result<()> {
             "author": {"name": commit.author.name, "email": commit.author.email, "time": commit.author.time},
             "committer": {"name": commit.committer.name, "email": commit.committer.email, "time": commit.committer.time},
             "message": commit.message,
+            "classification": class_label,
+            "classification_heuristic": true,
             "insertions": insertions,
             "deletions": deletions,
             "files": changes.iter().map(|c| json!({
@@ -100,6 +110,8 @@ pub fn commit(cli: &Cli, oid: &str) -> anyhow::Result<()> {
                 "insertions": c.insertions,
                 "deletions": c.deletions,
             })).collect::<Vec<_>>(),
+            "related_commits": related.iter().map(|(oid, overlap)| json!({"oid": oid, "shared_files": overlap})).collect::<Vec<_>>(),
+            "affected_contributors": contributors,
         }));
     }
 
@@ -123,6 +135,7 @@ pub fn commit(cli: &Cli, oid: &str) -> anyhow::Result<()> {
                 .join(" ")
         );
     }
+    println!("Classification: {class_label} (heuristic — docs/10 §7)");
     println!();
     for line in commit.message.lines() {
         println!("    {line}");
@@ -143,13 +156,109 @@ pub fn commit(cli: &Cli, oid: &str) -> anyhow::Result<()> {
             change.path.display()
         );
     }
+    if !related.is_empty() {
+        println!();
+        println!(" Related history (commits touching the same files):");
+        for (oid, overlap) in related.iter().take(8) {
+            println!(
+                "  {}  ({} shared file{})",
+                oid,
+                overlap,
+                if *overlap == 1 { "" } else { "s" }
+            );
+        }
+    }
+    if !contributors.is_empty() {
+        println!();
+        println!(" Affected contributors (authored related commits):");
+        for name in contributors.iter().take(8) {
+            println!("  {name}");
+        }
+    }
     Ok(())
+}
+
+/// Map a classification to a stable label.
+pub fn classification_label(c: &gitx_core::types::CommitClassification) -> &'static str {
+    use gitx_core::types::CommitClassification::*;
+    match c {
+        Feature => "feature",
+        Fix => "fix",
+        Refactor => "refactor",
+        Docs => "docs",
+        Test => "test",
+        Chore => "chore",
+        Revert => "revert",
+        Merge => "merge",
+        Unknown => "unknown",
+    }
+}
+
+/// Commits (other than `id`) whose changed-file set intersects the commit's,
+/// ranked by overlap size — bounded to `limit` walked commits (docs/07 §6
+/// related history). Also returns the deduplicated author names of those
+/// related commits (affected contributors).
+fn related_history(
+    repo: &gitx_git::Repository,
+    id: &ObjectId,
+    changes: &[gitx_git::models::FileChange],
+    limit: usize,
+) -> (Vec<(String, usize)>, Vec<String>) {
+    if changes.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let selected: std::collections::HashSet<&std::path::Path> =
+        changes.iter().map(|c| c.path.as_path()).collect();
+    let mut related: Vec<(String, usize)> = Vec::new();
+    let mut contributors: Vec<String> = Vec::new();
+    let mut seen_author: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let Ok(head) = repo.head_commit_id() else {
+        return (related, contributors);
+    };
+    for (walked, id_res) in repo.rev_walk(head).into_iter().flatten().enumerate() {
+        if walked >= limit {
+            break;
+        }
+        let Ok(cid) = id_res else { continue };
+        if &cid == id {
+            continue;
+        }
+        let Ok(c) = repo.find_commit(cid) else {
+            continue;
+        };
+        let parent_tree = c
+            .parents
+            .first()
+            .and_then(|p| repo.find_commit(*p).ok())
+            .map(|p| p.tree_id);
+        let Ok(other) = repo.diff_tree_to_tree(parent_tree, c.tree_id) else {
+            continue;
+        };
+        let overlap = other
+            .iter()
+            .filter(|ch| selected.contains(ch.path.as_path()))
+            .count();
+        if overlap > 0 {
+            related.push((short(&cid), overlap));
+            let key = format!("{} <{}>", c.author.name, c.author.email);
+            if seen_author.insert(key.clone()) {
+                contributors.push(c.author.name.clone());
+            }
+        }
+    }
+    related.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    (related, contributors)
+}
+
+fn short(id: &ObjectId) -> String {
+    id.to_string().chars().take(7).collect()
 }
 
 pub fn file_history(
     cli: &Cli,
     path: &str,
-    _follow: bool,
+    follow: bool,
     since: Option<String>,
     lines: bool,
 ) -> anyhow::Result<()> {
@@ -160,6 +269,62 @@ pub fn file_history(
     if lines {
         // `history --lines` is paginated like `blame` (docs/07 §7).
         return blame_inner(cli, path_buf, 500);
+    }
+
+    // `--follow` resolves renames along the mainline (docs/07 §7): the same
+    // rename-following walk as `gitx lineage`, so the file's earlier names
+    // appear in the history.
+    if follow {
+        let result = service
+            .get_file_lineage(path_buf.clone(), None)
+            .map_err(|e| anyhow::anyhow!("cannot follow {path}: {e}"))?;
+        if cli.json {
+            return print_json(&json!(
+                result
+                    .history
+                    .iter()
+                    .map(|n| json!({
+                        "oid": n.commit_id.to_string(),
+                        "path": n.path.display().to_string(),
+                        "action": match &n.action {
+                            gitx_history::FileAction::Added { copy_of } =>
+                                if copy_of.is_some() { "copied" } else { "added" },
+                            gitx_history::FileAction::Modified => "modified",
+                            gitx_history::FileAction::Deleted => "deleted",
+                            gitx_history::FileAction::Renamed { .. } => "renamed",
+                        },
+                    }))
+                    .collect::<Vec<_>>()
+            ));
+        }
+        if result.history.is_empty() {
+            println!("No history found for {path}.");
+            return Ok(());
+        }
+        println!("History of {path} (following renames, newest first):");
+        for node in &result.history {
+            let action = match &node.action {
+                gitx_history::FileAction::Added { copy_of } => match copy_of {
+                    Some(src) => format!("copied from {}", src.display()),
+                    None => "added".to_string(),
+                },
+                gitx_history::FileAction::Modified => "modified".to_string(),
+                gitx_history::FileAction::Deleted => "deleted".to_string(),
+                gitx_history::FileAction::Renamed { from } => {
+                    format!("renamed from {}", from.display())
+                }
+            };
+            let commit = repo.find_commit(node.commit_id)?;
+            println!(
+                "{} {}  {:<20}  {}  {}",
+                short_oid(&node.commit_id),
+                format_ts(commit.author.time),
+                commit.author.name,
+                node.path.display(),
+                action
+            );
+        }
+        return Ok(());
     }
 
     let commits = service.timeline(TimelineOptions {
@@ -232,7 +397,10 @@ pub fn lineage(cli: &Cli, path: &str) -> anyhow::Result<()> {
     println!("Lineage of {path} (newest first):");
     for node in &result.history {
         let action = match &node.action {
-            gitx_history::FileAction::Added => "added   ".to_string(),
+            gitx_history::FileAction::Added { copy_of } => match copy_of {
+                Some(src) => format!("copied from {}", src.display()),
+                None => "added   ".to_string(),
+            },
             gitx_history::FileAction::Modified => "modified".to_string(),
             gitx_history::FileAction::Deleted => "deleted ".to_string(),
             gitx_history::FileAction::Renamed { from } => {

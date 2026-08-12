@@ -130,6 +130,172 @@ impl std::fmt::Display for Dependency {
     }
 }
 
+/// A dependency with its directness resolved (docs/10 §11): *direct* when
+/// declared in a manifest, *indirect* when it only appears in a lockfile
+/// (a transitive dependency of a declared one).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DependencyDetail {
+    pub name: String,
+    pub version: Option<String>,
+    /// Where the version came from (manifest constraint or lockfile-resolved).
+    pub source: &'static str,
+    /// False for lockfile-only (transitive) dependencies.
+    pub direct: bool,
+}
+
+/// Merge declared manifest dependencies with lockfile-resolved ones into a
+/// deduplicated list where every entry is marked direct/indirect.
+pub fn classify_directness(
+    declared: &[Dependency],
+    locked: &[Dependency],
+) -> Vec<DependencyDetail> {
+    let mut out: Vec<DependencyDetail> = declared
+        .iter()
+        .map(|d| DependencyDetail {
+            name: d.name.clone(),
+            version: d.version.clone(),
+            source: "manifest",
+            direct: true,
+        })
+        .collect();
+    for d in locked {
+        if let Some(existing) = out.iter_mut().find(|e| e.name == d.name) {
+            // Prefer the declared version; the lockfile entry is already
+            // covered as direct.
+            existing.version = existing.version.clone().or_else(|| d.version.clone());
+        } else {
+            out.push(DependencyDetail {
+                name: d.name.clone(),
+                version: d.version.clone(),
+                source: "lockfile",
+                direct: false,
+            });
+        }
+    }
+    out.sort_by(|a, b| b.direct.cmp(&a.direct).then(a.name.cmp(&b.name)));
+    out
+}
+
+/// A Cargo feature declaration: `name = ["dep", "dep/feature", ...]`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CargoFeature {
+    pub name: String,
+    /// The deps/features this feature enables (docs/10 §11 cargo features).
+    pub enables: Vec<String>,
+}
+
+/// Parse the `[features]` section of a Cargo.toml (docs/10 §11).
+pub fn parse_cargo_features(content: &str) -> Vec<CargoFeature> {
+    let mut out = Vec::new();
+    let mut in_features = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_features = trimmed == "[features]";
+            continue;
+        }
+        if !in_features || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((name, rest)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let name = name.trim().trim_matches('"').to_string();
+        let list: Vec<String> = rest
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .split(',') // handle `["a", "b"]` and `["a","b"]`
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !name.is_empty() {
+            out.push(CargoFeature {
+                name,
+                enables: list,
+            });
+        }
+    }
+    out
+}
+
+/// Cargo features from the workspace's `Cargo.toml` manifests in a tree.
+pub fn cargo_features_in_tree(
+    repo: &Repository,
+    tree_id: gitx_git::models::ObjectId,
+) -> anyhow::Result<Vec<(PathBuf, Vec<CargoFeature>)>> {
+    let mut out = Vec::new();
+    for path in repo.list_blobs(tree_id)? {
+        if path.file_name().map(|n| n == "Cargo.toml").unwrap_or(false) {
+            let bytes = repo.blob_at_path(tree_id, &path)?.unwrap_or_default();
+            let features = parse_cargo_features(&String::from_utf8_lossy(&bytes));
+            if !features.is_empty() {
+                out.push((path, features));
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+/// A pnpm catalog entry: `name:` → version (pnpm-workspace.yaml `catalogs:`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PnpmCatalog {
+    pub name: String,
+    pub version: String,
+}
+
+/// Parse the `catalogs:` section of `pnpm-workspace.yaml` (docs/10 §11 pnpm
+/// catalogs). Default catalog lives under `catalogs:`, named catalogs under
+/// `catalogs.<name>:` — both have `name: version` pairs.
+pub fn parse_pnpm_catalogs(content: &str) -> Vec<PnpmCatalog> {
+    let mut out = Vec::new();
+    let mut in_catalog = false;
+    let mut depth = 0usize;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "catalogs:" {
+            in_catalog = true;
+            depth = 0;
+            continue;
+        }
+        if !in_catalog {
+            continue;
+        }
+        if trimmed.ends_with(':') && !trimmed.starts_with('-') {
+            // `catalogs.react18:` style named catalog or a nested key.
+            continue;
+        }
+        if let Some((name, version)) = trimmed.split_once(':') {
+            let name = name.trim();
+            if name.is_empty() || name.starts_with('-') {
+                continue;
+            }
+            let version = version.trim().trim_matches('"').trim_matches('\'');
+            if !version.is_empty() && !version.starts_with('#') {
+                out.push(PnpmCatalog {
+                    name: name.to_string(),
+                    version: version.to_string(),
+                });
+            }
+        }
+        let _ = depth;
+    }
+    out
+}
+
+/// Pnpm catalogs from `pnpm-workspace.yaml` in a tree, if present.
+pub fn pnpm_catalogs_in_tree(
+    repo: &Repository,
+    tree_id: gitx_git::models::ObjectId,
+) -> anyhow::Result<Vec<PnpmCatalog>> {
+    let Some(bytes) = repo.blob_at_path(tree_id, std::path::Path::new("pnpm-workspace.yaml"))?
+    else {
+        return Ok(Vec::new());
+    };
+    Ok(parse_pnpm_catalogs(&String::from_utf8_lossy(&bytes)))
+}
+
 /// All supported manifests found in the HEAD tree with their parsed
 /// dependencies. Deterministic; reads only the HEAD tree (docs/10 §11).
 pub fn head_dependencies(repo: &Repository) -> anyhow::Result<Vec<(PathBuf, Vec<Dependency>)>> {
@@ -1003,6 +1169,76 @@ lodash@^4.17.21:
         assert!(
             deps.iter()
                 .any(|d| d.name == "lodash" && d.version.as_deref() == Some("4.17.21"))
+        );
+    }
+
+    #[test]
+    fn classifies_direct_and_indirect() {
+        let declared = vec![Dependency {
+            name: "serde".into(),
+            version: Some("1.0".into()),
+        }];
+        let locked = vec![
+            Dependency {
+                name: "serde".into(),
+                version: Some("1.0.200".into()),
+            },
+            Dependency {
+                name: "proc-macro2".into(),
+                version: Some("1.0.86".into()),
+            },
+        ];
+        let detail = classify_directness(&declared, &locked);
+        assert_eq!(detail.len(), 2);
+        let serde = detail.iter().find(|d| d.name == "serde").unwrap();
+        assert!(serde.direct);
+        assert_eq!(serde.version.as_deref(), Some("1.0"));
+        let pm2 = detail.iter().find(|d| d.name == "proc-macro2").unwrap();
+        assert!(!pm2.direct);
+        assert_eq!(pm2.source, "lockfile");
+    }
+
+    #[test]
+    fn parses_cargo_features() {
+        let content = r#"
+[package]
+name = "demo"
+
+[dependencies]
+serde = "1"
+
+[features]
+default = ["std"]
+std = []
+full = ["serde/derive", "std"]
+"#;
+        let features = parse_cargo_features(content);
+        assert_eq!(features.len(), 3);
+        let full = features.iter().find(|f| f.name == "full").unwrap();
+        assert!(full.enables.contains(&"serde/derive".to_string()));
+        assert!(full.enables.contains(&"std".to_string()));
+    }
+
+    #[test]
+    fn parses_pnpm_catalogs() {
+        let content = r#"
+packages:
+  - packages/*
+
+catalogs:
+  react: ^18.0.0
+  typescript: 5.4.0
+"#;
+        let catalogs = parse_pnpm_catalogs(content);
+        assert!(
+            catalogs
+                .iter()
+                .any(|c| c.name == "react" && c.version == "^18.0.0")
+        );
+        assert!(
+            catalogs
+                .iter()
+                .any(|c| c.name == "typescript" && c.version == "5.4.0")
         );
     }
 

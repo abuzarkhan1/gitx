@@ -7,6 +7,27 @@ All notable changes to GitX are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- Search: `--renames`/`--history` filters query rename history; new
+  `--symbols`/`--directories` scopes (CLI + TUI); deterministic tiered
+  ranking (exact → path/name → recent → FTS score); bounded code-content
+  search with a HEAD-tree fallback for bare repositories and a cap note.
+- Symbols: dependency-free heuristic extractor across 10+ languages with a
+  new `gitx symbols` command; symbols are indexed by `scan`/`refresh` and
+  searchable.
+- Architecture milestones: `gitx architecture milestones` (initial commit,
+  first tag, module additions, structural refactors, dependency-direction
+  flips); `architecture diff` reports direction changes.
+- Dependencies: direct/transitive classification, Cargo `[features]` and
+  pnpm `catalogs:` support; new `gitx dependencies features` subcommand.
+- Commit detail: classification, related history (shared-file overlap) and
+  affected contributors in `gitx commit` and the TUI detail view.
+- `gitx history --follow` follows renames via the lineage engine (was a
+  no-op flag); copy lineage detected via blob equality at file birth.
+- TUI: responsive sidebar (width-adaptive with truncated labels); loader
+  progress with stage + step/total and Esc-to-cancel; structured error
+  overlay with "Reason / Suggested action"; Recovery panel lists dangling
+  trees/blobs; branch rows show divergence, shared files and staleness;
+  file detail shows contributors, churn and hotspot metrics.
 - Repository intelligence pipeline: hotspots, risk, ownership concentration,
   and the six-sub-score health composite (docs/10).
 - Incremental indexer with SQLite persistence (`gitx scan` / `gitx refresh`).

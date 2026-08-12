@@ -4,6 +4,7 @@ use crate::commands::{format_ts, open_repo, print_json};
 use gitx_analysis::{FileAnalysis, HotspotWeights, analyze_repository_with};
 use serde_json::json;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Analysis weights from the effective configuration (docs/16 §3–§5): global
 /// config overlaid by a repository `gitx.toml` when present, falling back to
@@ -443,6 +444,15 @@ pub fn architecture_diff(cli: &Cli, from: &str, to: &str) -> anyhow::Result<()> 
         }
     }
 
+    // Dependency-direction changes between the two snapshots (docs/10 §10):
+    // module import edges whose direction flipped or newly appeared.
+    let before_edges = gitx_analysis::structure::module_import_edges(&repo, from_commit.tree_id)
+        .unwrap_or_default();
+    let after_edges =
+        gitx_analysis::structure::module_import_edges(&repo, to_commit.tree_id).unwrap_or_default();
+    let direction_changes =
+        gitx_analysis::structure::direction_changes(&before_edges, &after_edges);
+
     if cli.json {
         return print_json(&json!({
             "from": from,
@@ -451,6 +461,7 @@ pub fn architecture_diff(cli: &Cli, from: &str, to: &str) -> anyhow::Result<()> 
             "removed": diff.removed.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
             "modified": diff.modified.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
             "modules_added": added_dirs.iter().collect::<Vec<_>>(),
+            "dependency_direction_changes": direction_changes,
         }));
     }
 
@@ -475,6 +486,39 @@ pub fn architecture_diff(cli: &Cli, from: &str, to: &str) -> anyhow::Result<()> 
         for dir in added_dirs {
             println!("    + {dir}/");
         }
+    }
+    if !direction_changes.is_empty() {
+        println!();
+        println!("  dependency-direction changes (heuristic import edges):");
+        for change in &direction_changes {
+            println!("    ~ {change}");
+        }
+    }
+    Ok(())
+}
+
+/// Detect architectural milestones from the mainline (docs/10 §10).
+pub fn architecture_milestones(cli: &Cli, max: usize) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let milestones = gitx_analysis::structure::architecture_milestones(&repo, max)?;
+
+    if cli.json {
+        return print_json(&json!(milestones));
+    }
+
+    println!("Architectural milestones (newest → oldest, docs/10 §10)");
+    if milestones.is_empty() {
+        println!("  (no milestones detected in the last {max} commits)");
+        return Ok(());
+    }
+    for m in milestones.iter().rev() {
+        println!(
+            "  {:<11} {:<20}  {}  {}",
+            m.commit,
+            format_ts(m.time),
+            m.kind,
+            m.description
+        );
     }
     Ok(())
 }
@@ -576,6 +620,7 @@ pub fn dependencies(cli: &Cli, action: Option<DependenciesAction>) -> anyhow::Re
         DependenciesAction::History { max } => dependencies_history(cli, max),
         DependenciesAction::Diff { from, to } => dependencies_diff(cli, &from, &to),
         DependenciesAction::Workspace => dependencies_workspace(cli),
+        DependenciesAction::Features => dependencies_features(cli),
         DependenciesAction::Usage { max } => dependencies_usage(cli, max),
     }
 }
@@ -686,6 +731,59 @@ pub fn dependencies_workspace(cli: &Cli) -> anyhow::Result<()> {
     for member in &ws.members {
         println!("    {}", member.display());
     }
+    // Pnpm catalogs (docs/10 §11): declared versions shared by members.
+    let catalogs = gitx_analysis::manifest::pnpm_catalogs_in_tree(&repo, head_commit.tree_id)?;
+    if !catalogs.is_empty() {
+        println!("  pnpm catalogs ({}):", catalogs.len());
+        for c in catalogs {
+            println!("    {} {}", c.name, c.version);
+        }
+    }
+    Ok(())
+}
+
+/// Cargo feature flags + pnpm catalogs declared in HEAD (docs/10 §11).
+pub fn dependencies_features(cli: &Cli) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let head = repo.head_commit_id()?;
+    let head_commit = repo.find_commit(head)?;
+    let features = gitx_analysis::manifest::cargo_features_in_tree(&repo, head_commit.tree_id)?;
+    let catalogs = gitx_analysis::manifest::pnpm_catalogs_in_tree(&repo, head_commit.tree_id)?;
+
+    if cli.json {
+        return print_json(&json!({
+            "cargo_features": features.iter().map(|(path, fs)| json!({
+                "manifest": path.display().to_string(),
+                "features": fs,
+            })).collect::<Vec<_>>(),
+            "pnpm_catalogs": catalogs,
+        }));
+    }
+
+    if features.is_empty() && catalogs.is_empty() {
+        println!("No cargo features or pnpm catalogs declared in HEAD.");
+        return Ok(());
+    }
+    for (path, fs) in &features {
+        println!("{}", path.display());
+        for f in fs {
+            if f.enables.is_empty() {
+                println!("    feature {:<20} (empty)", f.name);
+            } else {
+                println!(
+                    "    feature {:<20} enables: {}",
+                    f.name,
+                    f.enables.join(", ")
+                );
+            }
+        }
+    }
+    if !catalogs.is_empty() {
+        println!("pnpm-workspace.yaml catalogs:");
+        for c in &catalogs {
+            println!("    {} {}", c.name, c.version);
+        }
+    }
     Ok(())
 }
 
@@ -695,32 +793,53 @@ pub fn dependencies_list(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
     let head = repo.head_commit_id()?;
     let head_commit = repo.find_commit(head)?;
-    let mut found = gitx_analysis::manifest::head_dependencies_at(&repo, head_commit.tree_id)?;
-    found.extend(gitx_analysis::manifest::lockfile_dependencies_at(
-        &repo,
-        head_commit.tree_id,
-    )?);
+    let declared = gitx_analysis::manifest::head_dependencies_at(&repo, head_commit.tree_id)?;
+    let locked = gitx_analysis::manifest::lockfile_dependencies_at(&repo, head_commit.tree_id)?;
 
-    if cli.json {
-        return print_json(&json!(found
+    // Merge per-manifest: direct (declared) + indirect (lockfile-only).
+    let mut rows: Vec<(PathBuf, Vec<gitx_analysis::manifest::DependencyDetail>)> = Vec::new();
+    for (path, deps) in &declared {
+        let locked_here: Vec<_> = locked
             .iter()
-            .map(|(path, deps)| json!({
-                "manifest": path.display().to_string(),
-                "dependencies": deps.iter().map(|d| json!({"name": d.name, "version": d.version})).collect::<Vec<_>>(),
-            }))
-            .collect::<Vec<_>>()));
+            .filter(|(p, _)| p == path)
+            .flat_map(|(_, d)| d.iter().cloned())
+            .collect();
+        rows.push((
+            path.clone(),
+            gitx_analysis::manifest::classify_directness(deps, &locked_here),
+        ));
+    }
+    // Lockfile-only manifests (e.g. a standalone Cargo.lock) still list their
+    // entries as indirect.
+    for (path, deps) in &locked {
+        if !rows.iter().any(|(p, _)| p == path) {
+            let details = gitx_analysis::manifest::classify_directness(&[], deps);
+            rows.push((path.clone(), details));
+        }
     }
 
-    if found.is_empty() {
+    if cli.json {
+        return print_json(&json!(
+            rows.iter()
+                .map(|(path, deps)| json!({
+                    "manifest": path.display().to_string(),
+                    "dependencies": deps,
+                }))
+                .collect::<Vec<_>>()
+        ));
+    }
+
+    if rows.is_empty() {
         println!("No supported dependency manifests found in HEAD.");
         return Ok(());
     }
-    for (path, deps) in &found {
+    for (path, deps) in &rows {
         println!("{}", path.display());
         for dep in deps {
+            let marker = if dep.direct { "direct" } else { "indirect" };
             match &dep.version {
-                Some(v) => println!("    {} {v}", dep.name),
-                None => println!("    {}", dep.name),
+                Some(v) => println!("    [{marker:<8}] {} {v}", dep.name),
+                None => println!("    [{marker:<8}] {}", dep.name),
             }
         }
     }
@@ -929,6 +1048,263 @@ pub fn regressions(cli: &Cli, max: usize) -> anyhow::Result<()> {
 
 fn short_oid_str(oid: &str) -> String {
     oid.chars().take(7).collect()
+}
+
+/// Source symbols from the HEAD tree (docs/21 Stage 6, docs/11 §2).
+/// Extraction is line-based and heuristic (see `gitx_analysis::symbols`);
+/// output is deterministic and read-only.
+pub fn symbols(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let head = repo.head_commit_id()?;
+    let head_commit = repo.find_commit(head)?;
+    let mut found = gitx_analysis::symbols::extract_symbols_from_tree(&repo, head_commit.tree_id)?;
+    if let Some(p) = path {
+        found.retain(|(path, _)| path.starts_with(p));
+    }
+    let total: usize = found.iter().map(|(_, s)| s.len()).sum();
+
+    if cli.json {
+        return print_json(&json!(found
+            .iter()
+            .map(|(path, syms)| json!({
+                "file": path.display().to_string(),
+                "symbols": syms.iter().map(|s| json!({"name": s.name, "kind": s.kind, "line": s.line})).collect::<Vec<_>>(),
+            }))
+            .collect::<Vec<_>>()));
+    }
+
+    println!("Symbols in HEAD (heuristic extraction — docs/21 Stage 6)");
+    println!("  {total} symbols in {} file(s)", found.len());
+    for (path, syms) in &found {
+        println!("{}", path.display());
+        for s in syms.iter().take(60) {
+            println!("    {:>5}  {:<9}  {}", s.line, s.kind, s.name);
+        }
+        if syms.len() > 60 {
+            println!("    ... {} more", syms.len() - 60);
+        }
+    }
+    Ok(())
+}
+
+/// Module/file dependency graph of the HEAD tree (docs/21 Stage 6): builds a
+/// `gitx_graph::CodeGraph` (file + directory nodes, Contains + Imports edges)
+/// from the tree plus heuristic import scanning.
+pub fn graph(cli: &Cli) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let head = repo.head_commit_id()?;
+    let head_commit = repo.find_commit(head)?;
+
+    let mut graph = gitx_graph::graph::CodeGraph::new();
+    let mut import_edges: Vec<(String, String)> = Vec::new();
+
+    // File nodes + directory containment + import edges (heuristic).
+    let mut dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for path in repo.list_blobs(head_commit.tree_id)? {
+        let path_str = path.display().to_string();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path_str.clone());
+        graph.add_node(&path, name, gitx_graph::graph::NodeType::File);
+        let mut parent = path.parent();
+        while let Some(p) = parent {
+            let dir = p.display().to_string();
+            if dir != "." && !dir.is_empty() && dirs.insert(dir.clone()) {
+                let dname = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| dir.clone());
+                graph.add_node(p, dname, gitx_graph::graph::NodeType::Directory);
+            }
+            parent = p.parent();
+        }
+
+        // Heuristic imports: `use a::b`, `import x from 'y'`, `require('y')`,
+        // `from x import y`. Edges to resolvable repo-relative module paths.
+        let Ok(Some(bytes)) = repo.blob_at_path(head_commit.tree_id, &path) else {
+            continue;
+        };
+        let content = String::from_utf8_lossy(&bytes);
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let imports: Vec<String> = match ext.as_str() {
+            "rs" => content
+                .lines()
+                .filter(|l| l.trim_start().starts_with("use "))
+                .map(|l| {
+                    l.trim()
+                        .trim_start_matches("use ")
+                        .split("::")
+                        .next()
+                        .unwrap_or("")
+                        .to_string()
+                })
+                .collect(),
+            "js" | "ts" | "jsx" | "tsx" | "mjs" | "cjs" => content
+                .lines()
+                .filter_map(|l| {
+                    let t = l.trim();
+                    if let Some(rest) = t.strip_prefix("import ")
+                        && rest.contains("from")
+                    {
+                        rest.split("from")
+                            .nth(1)
+                            .map(|s| s.trim().trim_matches(['\'', '"', ';']).to_string())
+                    } else {
+                        t.strip_prefix("require(")
+                            .map(|rest| rest.trim().trim_matches(['\'', '"', ')', ';']).to_string())
+                    }
+                })
+                .filter(|i| i.starts_with('.') || i.starts_with('/'))
+                .collect(),
+            "py" => content
+                .lines()
+                .filter_map(|l| {
+                    let t = l.trim();
+                    if let Some(rest) = t.strip_prefix("from ")
+                        && let Some((module, _)) = rest.split_once(" import")
+                    {
+                        Some(module.trim().to_string())
+                    } else if let Some(rest) = t.strip_prefix("import ")
+                        && !rest.starts_with('(')
+                    {
+                        Some(rest.split_whitespace().next().unwrap_or("").to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            "go" => content
+                .lines()
+                .filter_map(|l| {
+                    let t = l.trim();
+                    t.strip_prefix("import ")
+                        .map(|s| s.trim().trim_matches(['\'', '"']).to_string())
+                        .or_else(|| {
+                            t.strip_prefix('\t')
+                                .filter(|_| t.starts_with("\""))
+                                .map(|s| s.trim().trim_matches('"').to_string())
+                        })
+                })
+                .filter(|i| i.contains('/'))
+                .collect(),
+            _ => Vec::new(),
+        };
+        for imp in imports {
+            if imp.is_empty() {
+                continue;
+            }
+            // Resolve relative imports against the importing file's directory;
+            // absolute-ish module paths are kept as-is (unresolvable → skip).
+            let target = if imp.starts_with('.') {
+                let base = path.parent().unwrap_or_else(|| std::path::Path::new("/"));
+                let joined = base.join(&imp);
+                let norm = normalize(&joined.to_string_lossy());
+                if repo
+                    .list_blobs(head_commit.tree_id)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|p| p.starts_with(&norm))
+                {
+                    norm
+                } else {
+                    continue;
+                }
+            } else {
+                continue; // external/unresolvable imports are out of scope
+            };
+            import_edges.push((path_str.clone(), target));
+        }
+    }
+
+    // Add import edges between existing file nodes only.
+    let mut edge_count = 0usize;
+    for (from, to) in &import_edges {
+        if let (Some(a), Some(b)) = (graph.get_node(from), graph.get_node(to)) {
+            graph.add_edge(a, b, gitx_graph::graph::EdgeType::Imports, 1);
+            edge_count += 1;
+        }
+    }
+
+    let mut nodes: Vec<serde_json::Value> = graph
+        .graph
+        .node_indices()
+        .map(|i| {
+            let d = &graph.graph[i];
+            json!({
+                "name": d.name,
+                "path": d.path.display().to_string(),
+                "type": format!("{:?}", d.node_type).to_lowercase(),
+            })
+        })
+        .collect();
+    nodes.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
+    let mut edges: Vec<serde_json::Value> = graph
+        .graph
+        .edge_indices()
+        .map(|e| {
+            let (a, b) = graph.graph.edge_endpoints(e).unwrap();
+            let d = &graph.graph[e];
+            json!({
+                "from": graph.graph[a].path.display().to_string(),
+                "to": graph.graph[b].path.display().to_string(),
+                "type": format!("{:?}", d.edge_type).to_lowercase(),
+                "weight": d.weight,
+            })
+        })
+        .collect();
+    edges.sort_by(|a, b| {
+        (a["from"].as_str(), a["to"].as_str()).cmp(&(b["from"].as_str(), b["to"].as_str()))
+    });
+
+    if cli.json {
+        return print_json(&json!({"nodes": nodes, "edges": edges}));
+    }
+
+    println!("Graph (HEAD tree + heuristic imports — docs/21 Stage 6)");
+    println!(
+        "  {} nodes ({} files, {} directories), {} import edges",
+        nodes.len(),
+        nodes.iter().filter(|n| n["type"] == "file").count(),
+        nodes.iter().filter(|n| n["type"] == "directory").count(),
+        edge_count
+    );
+    println!();
+    println!("  directories:");
+    for n in nodes.iter().filter(|n| n["type"] == "directory") {
+        println!("    {}", n["path"].as_str().unwrap_or(""));
+    }
+    println!();
+    println!("  import edges (resolvable relative imports only):");
+    if edge_count == 0 {
+        println!("    (none — imports are external or unparsed by the heuristic)");
+    }
+    for e in edges.iter().take(60) {
+        println!(
+            "    {} → {}",
+            e["from"].as_str().unwrap_or(""),
+            e["to"].as_str().unwrap_or("")
+        );
+    }
+    Ok(())
+}
+
+/// Normalize a relative path string (remove `./` and resolve `..` segments).
+fn normalize(p: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for seg in p.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            s => parts.push(s.to_string()),
+        }
+    }
+    parts.join("/")
 }
 
 fn file_json(f: &FileAnalysis) -> serde_json::Value {

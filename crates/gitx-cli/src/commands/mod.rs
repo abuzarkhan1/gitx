@@ -62,6 +62,9 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
                     Some(crate::cli::ArchitectureAction::Diff { from, to }) => {
                         analysis::architecture_diff(&cli, &from, &to)
                     }
+                    Some(crate::cli::ArchitectureAction::Milestones { max }) => {
+                        analysis::architecture_milestones(&cli, max)
+                    }
                     _ => analysis::architecture(&cli),
                 },
             }
@@ -70,6 +73,8 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
         Commands::Risk { path } => analysis::risk(&cli, path.as_deref()),
         Commands::Health => analysis::health(&cli),
         Commands::Regressions { max } => analysis::regressions(&cli, max),
+        Commands::Symbols { path } => analysis::symbols(&cli, path.as_deref()),
+        Commands::Graph => analysis::graph(&cli),
         Commands::Search {
             query,
             since,
@@ -81,6 +86,8 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
             renames,
             code,
             history,
+            symbols,
+            directories,
             author,
         } => search::search(
             &cli,
@@ -94,6 +101,8 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
             renames,
             code,
             history,
+            symbols,
+            directories,
             author,
         ),
         Commands::Recovery { action } => recovery::recovery(&cli, action),

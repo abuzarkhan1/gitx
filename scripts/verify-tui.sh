@@ -61,9 +61,11 @@ for _ in $(seq 1 40); do
   sleep 0.5
   tmux capture-pane -t "$SESS" -p | grep -q "GitX" && break
 done
-for _ in $(seq 1 30); do
+# Wait until the loader finished: keep polling while the status bar shows
+# the progress/cancel hint (docs/08 §6), break once it is gone.
+for _ in $(seq 1 60); do
   sleep 0.5
-  tmux capture-pane -t "$SESS" -p | grep -qv "Reloading repository data" && break
+  tmux capture-pane -t "$SESS" -p | grep -q "Esc cancel" || break
 done
 
 snap() { tmux capture-pane -t "$SESS" -p > "$OUT/$1.txt"; }
@@ -251,14 +253,14 @@ check 18_recovery "Reflog:"           "recovery view"
 esc 0.3
 keys '/' 0.4
 keys 'feat' 1.5
-if wait_for "Search (FTS" 10; then
+if wait_for "Search (commits · files · authors · branches · tags · renames · symbols · code)" 10; then
   echo "  PASS  search view opens with async FTS"
   PASS=$((PASS + 1))
 else
   echo "  FAIL  search view opens with async FTS"
   FAIL=$((FAIL + 1))
 fi
-if wait_for "commit [0-9a-f]" 15; then
+if wait_for "commit  *[0-9a-f]" 15; then   # badge 'commit   <oid>' (basic-regex compatible)
   echo "  PASS  search results (commit scope)"
   PASS=$((PASS + 1))
 else

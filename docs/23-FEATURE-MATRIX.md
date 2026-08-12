@@ -20,11 +20,26 @@
 | Architecture | Directory evolution | Yes | Yes | Yes | Yes | Yes |
 | Architecture | Dependency evolution | Yes | Yes | Yes | Yes | Yes |
 | Search | Full-text history | Yes | Yes | Yes | Yes | Yes |
+| Search | Rename search (`--renames`) | Yes | Yes | Yes | Yes | Yes |
+| Search | Symbol search | Yes | Yes | Yes | Yes | Yes |
+| Search | Directory search | Yes | Yes | Yes | Yes | Yes |
+| Search | Code-content search (`--code`) | Yes | Yes | Yes | Yes | — |
 | Recovery | Reflog | Yes | Yes | Yes | Yes | Yes |
 | Recovery | Unreachable commits | Yes | Yes | Yes | Yes | Yes |
+| Recovery | Dangling trees/blobs | Yes | Yes | Yes | Yes | Yes |
 | Release | Ref comparison | Yes | Yes | Yes | Yes | Yes |
-| Structure | Language symbols | Later | Yes | Yes | Yes | Yes |
-| Structure | Tree-sitter analysis | Later | Yes | Yes | Yes | Yes |
+| Structure | Language symbols | Yes | Yes | Yes | Yes | Yes |
+| Structure | Tree-sitter analysis | Later | — | — | — | — |
+
+Notes:
+
+- Language symbols use the deterministic line-based extractor
+  (`gitx symbols`, docs/21 Stage 6) — **not** Tree-sitter. Tree-sitter remains
+  optional (ADR-011, Proposed): the `gitx-graph` parser is still a no-op
+  placeholder and nothing consumes it.
+- Code-content search is bounded to the working tree with a HEAD-tree
+  fallback (docs/11 §5) and is not part of the persisted index.
+
 
 ## Explicitly excluded
 

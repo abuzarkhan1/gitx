@@ -41,9 +41,13 @@ fn lineage_follows_rename_backward() {
         "first node should be the rename, got {:?}",
         lineage.history[0].action
     );
-    assert_eq!(
-        lineage.history[1].action,
-        gitx_history::FileAction::Added,
+    // The original add may now carry copy-of detection (blob-equality,
+    // docs/02 §2 copies): only the action kind matters here.
+    assert!(
+        matches!(
+            lineage.history[1].action,
+            gitx_history::FileAction::Added { .. }
+        ),
         "second node should be the original add"
     );
 }

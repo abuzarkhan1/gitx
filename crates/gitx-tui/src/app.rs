@@ -27,6 +27,21 @@ pub enum Detail {
     File { path: std::path::PathBuf },
 }
 
+/// Progress messages from the background repository loader (docs/08 §6:
+/// operation name, processed/total, cancellation). The worker reports each
+/// stage as it completes; the final message carries the loaded data.
+pub enum LoadMsg {
+    /// A stage completed: human-readable name + step index + total steps.
+    Progress {
+        phase: &'static str,
+        step: usize,
+        total: usize,
+    },
+    /// The full repository data set landed. Boxed so the tiny `Progress`
+    /// variant stays small (clippy::large_enum_variant).
+    Done(Box<AppData>),
+}
+
 pub struct App {
     pub current_view: View,
     pub nav_index: usize,
@@ -116,10 +131,22 @@ pub struct App {
     /// True while an FTS search is running on a worker thread (docs/08: the
     /// UI never freezes on large repositories).
     pub search_pending: bool,
+    /// Terminal width from the last render (docs/08 §5 responsive layout):
+    /// lets the mouse handler compute the sidebar width for click targets.
+    pub width: u16,
+    /// Current loader stage name (docs/08 §6 loading progress), while
+    /// `loading` is true: e.g. "Analyzing hotspots & health".
+    pub load_phase: &'static str,
+    /// Completed loader steps out of `load_total` (docs/08 §6 processed/total).
+    pub load_step: usize,
+    pub load_total: usize,
+    /// Shared cancellation flag for the background loader (docs/08 §6): Esc
+    /// sets it and the worker stops between stages; results are discarded.
+    cancel_load: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Receiver for the background data load (docs/08 loading progress): the
     /// repo data is computed on a worker thread so the UI renders immediately
     /// and the status bar shows progress while it loads.
-    data_rx: Option<std::sync::mpsc::Receiver<AppData>>,
+    data_rx: Option<std::sync::mpsc::Receiver<LoadMsg>>,
     /// Receiver for async FTS search results (docs/08 Search: the query runs
     /// on a worker thread; results land here on the next tick).
     search_rx: Option<std::sync::mpsc::Receiver<Vec<gitx_services::SearchHit>>>,
@@ -139,10 +166,11 @@ impl App {
     }
 
     fn spawn_load() -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::channel::<LoadMsg>();
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
         std::thread::spawn(move || {
-            let data = load_repo_stats();
-            let _ = tx.send(data);
+            load_repo_stats(&tx, &worker_cancel);
         });
         Self {
             current_view: View::Overview,
@@ -150,6 +178,10 @@ impl App {
             running: true,
             error: None,
             loading: true,
+            load_phase: "Discovering repository",
+            load_step: 0,
+            load_total: LOAD_STAGES,
+            cancel_load: cancel,
             stats: None,
             timeline: None,
             hotspots: None,
@@ -182,6 +214,7 @@ impl App {
             load_frame: 0,
             nav_used: false,
             search_pending: false,
+            width: 0,
             data_rx: Some(rx),
             search_rx: None,
         }
@@ -214,15 +247,30 @@ impl App {
     }
 
     /// Reload all repository data on a worker thread (docs/08: `r` refresh).
-    /// The status bar shows progress while the new data loads.
+    /// The status bar shows the stage and step/total while it loads (docs/08
+    /// §6), and Esc cancels the load.
     pub fn reload(&mut self) {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::channel::<LoadMsg>();
+        self.cancel_load
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        let cancel = self.cancel_load.clone();
         std::thread::spawn(move || {
-            let data = load_repo_stats();
-            let _ = tx.send(data);
+            load_repo_stats(&tx, &cancel);
         });
         self.data_rx = Some(rx);
         self.loading = true;
+        self.load_phase = "Discovering repository";
+        self.load_step = 0;
+        self.load_total = 7;
+    }
+
+    /// Cancel the in-flight background load (docs/08 §6 cancellation hint):
+    /// Esc stops the spinner and discards any results that still land.
+    pub fn cancel_loading(&mut self) {
+        self.cancel_load
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.loading = false;
+        self.data_rx = None;
     }
 
     /// Poll the background loader; returns true when new data landed.
@@ -231,8 +279,14 @@ impl App {
             return false;
         };
         match rx.try_recv() {
-            Ok(data) => {
-                self.apply_data(data);
+            Ok(LoadMsg::Progress { phase, step, total }) => {
+                self.load_phase = phase;
+                self.load_step = step;
+                self.load_total = total;
+                false
+            }
+            Ok(LoadMsg::Done(data)) => {
+                self.apply_data(*data);
                 self.data_rx = None;
                 true
             }
@@ -382,7 +436,9 @@ impl App {
                         "commit" => Some(Detail::Commit {
                             oid: hit.id.clone(),
                         }),
-                        "file" => Some(Detail::File {
+                        // File, code and symbol hits all resolve to a file
+                        // path (docs/08 Search: Enter opens the result).
+                        "file" | "code" | "symbol" => Some(Detail::File {
                             path: std::path::PathBuf::from(&hit.id),
                         }),
                         _ => None,
@@ -449,8 +505,13 @@ impl App {
             None => return vec!["No repository loaded.".to_string()],
         };
         match detail {
-            Detail::Commit { oid } => render_commit_detail(&repo, oid),
-            Detail::File { path } => render_file_detail(&repo, path),
+            Detail::Commit { oid } => render_commit_detail(
+                &repo,
+                oid,
+                self.timeline.as_deref(),
+                self.commit_files.as_deref(),
+            ),
+            Detail::File { path } => render_file_detail(&repo, path, self.hotspots.as_ref()),
         }
     }
 
@@ -477,6 +538,9 @@ impl App {
         };
         // FTS5-safe phrase query: quote the input (doubling embedded quotes).
         let query = format!("\"{}\"", raw.replace('"', "\"\""));
+        // Owned copy for the worker thread (the code-content scope needs the
+        // raw term, not the FTS-escaped phrase).
+        let raw_owned = raw.to_string();
         let (tx, rx) = std::sync::mpsc::channel();
         self.search_rx = Some(rx);
         self.search_pending = true;
@@ -492,9 +556,15 @@ impl App {
                         authors: true,
                         branches: true,
                         tags: true,
+                        renames: true,
+                        symbols: true,
+                        directories: true,
+                        code: true,
                         ..Default::default()
                     };
-                    service.search(&query, &options).unwrap_or_default()
+                    service
+                        .search(&query, &raw_owned, &options)
+                        .unwrap_or_default()
                 })
                 .unwrap_or_default();
             let _ = tx.send(hits);
@@ -556,14 +626,39 @@ pub struct AppData {
     pub arch_diff: Option<ArchDiff>,
 }
 
+/// Total loader stages reported by [`load_repo_stats`] (docs/08 §6
+/// processed/total progress in the status bar).
+const LOAD_STAGES: usize = 7;
+
 /// Load repository data eagerly at startup by discovering the repository from
 /// the current directory. Blocks briefly; acceptable for V1 (docs/08 notes the
-/// overview is the first-render anchor).
-fn load_repo_stats() -> AppData {
+/// overview is the first-render anchor). Reports each stage on `tx` so the
+/// status bar can show operation + step/total (docs/08 §6) and stops between
+/// stages when `cancel` is set (Esc).
+fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::atomic::AtomicBool) {
+    use std::sync::atomic::Ordering;
+
+    // Report a completed stage; returns true when the load was cancelled.
+    let report = |tx: &std::sync::mpsc::Sender<LoadMsg>,
+                  cancel: &std::sync::atomic::AtomicBool,
+                  step: usize,
+                  phase: &'static str|
+     -> bool {
+        if cancel.load(Ordering::Relaxed) {
+            return true;
+        }
+        let _ = tx.send(LoadMsg::Progress {
+            phase,
+            step,
+            total: LOAD_STAGES,
+        });
+        false
+    };
+
     let repo = match gitx_git::Repository::discover(".") {
         Ok(repo) => repo,
         Err(err) => {
-            return AppData {
+            let _ = tx.send(LoadMsg::Done(Box::new(AppData {
                 stats: None,
                 timeline: None,
                 hotspots: None,
@@ -582,7 +677,8 @@ fn load_repo_stats() -> AppData {
                 health_evidence: Vec::new(),
                 commit_files: None,
                 arch_diff: None,
-            };
+            })));
+            return;
         }
     };
     let path = repo.work_dir().map(|p| p.display().to_string());
@@ -591,7 +687,13 @@ fn load_repo_stats() -> AppData {
     // Services layer (docs/04 §6): statistics and analysis go through
     // `RepositoryService`/`AnalysisService`, which prefer the fresh persisted
     // index and fall back to live Git computation (docs/13 §3).
+    if report(tx, cancel, 1, "Repository discovered") {
+        return;
+    }
     let stats = index_stats_or_live(&repo);
+    if report(tx, cancel, 2, "Building timeline") {
+        return;
+    }
     let service = gitx_history::timeline::HistoryService::new(&repo);
     let timeline = service
         .timeline(gitx_history::timeline::TimelineOptions {
@@ -599,6 +701,9 @@ fn load_repo_stats() -> AppData {
             ..Default::default()
         })
         .ok();
+    if report(tx, cancel, 3, "Analyzing hotspots & health") {
+        return;
+    }
     // Index-backed analysis via AnalysisService (docs/04 §6, docs/13 §3):
     // fresh cache → read; otherwise live computation.
     let hotspots = gitx_services::AnalysisService::new(&repo)
@@ -699,6 +804,9 @@ fn load_repo_stats() -> AppData {
             })
             .collect::<Vec<(u32, String, Vec<String>)>>()
     });
+    if report(tx, cancel, 4, "Reading branches & contributors") {
+        return;
+    }
     let timeline_file_counts = per_commit_areas
         .as_ref()
         .map(|v| v.iter().map(|(n, _, _)| *n).collect());
@@ -710,6 +818,9 @@ fn load_repo_stats() -> AppData {
         .as_ref()
         .map(|v| v.iter().map(|(_, _, f)| f.clone()).collect());
 
+    if report(tx, cancel, 5, "Architecture & activity") {
+        return;
+    }
     // Architecture before/after (docs/08 Architecture view, docs/10 §10):
     // HEAD vs the newest commit ≥30 days old (falling back to the oldest
     // commit in the window).
@@ -773,16 +884,22 @@ fn load_repo_stats() -> AppData {
             .collect()
     });
 
+    if report(tx, cancel, 6, "Dependencies & recovery") {
+        return;
+    }
     let dependencies = gitx_analysis::manifest::head_dependencies(&repo).ok();
     // Cap the object-database scan so TUI startup stays fast on large repos
     // (the CLI `gitx recovery` does the full scan on demand).
     let recovery = gitx_analysis::recovery::analyze_recovery_capped(&repo).ok();
 
+    if report(tx, cancel, 7, "Finishing") {
+        return;
+    }
     // Per-sub-score evidence for the Health view (docs/08 §3: never just a
     // number). Index order matches the six sub-scores.
     let health_evidence = build_health_evidence(hotspots.as_ref());
 
-    AppData {
+    let _ = tx.send(LoadMsg::Done(Box::new(AppData {
         stats,
         timeline,
         hotspots,
@@ -801,7 +918,7 @@ fn load_repo_stats() -> AppData {
         health_evidence,
         commit_files,
         arch_diff,
-    }
+    })));
 }
 
 /// Structural before/after comparison (docs/08 Architecture view): snapshot
@@ -980,9 +1097,15 @@ fn build_health_evidence(analysis: Option<&gitx_analysis::RepoAnalysis>) -> Vec<
     ]
 }
 
-/// Render a commit's full detail: metadata, message, and changed files with
-/// diff stats (mirrors `gitx commit <oid>`).
-fn render_commit_detail(repo: &gitx_git::Repository, oid: &str) -> Vec<String> {
+/// Render a commit's full detail: metadata, classification, message, changed
+/// files with diff stats, related history, and affected contributors
+/// (mirrors `gitx commit <oid>`, docs/07 §6, docs/08 §3).
+fn render_commit_detail(
+    repo: &gitx_git::Repository,
+    oid: &str,
+    timeline: Option<&[gitx_git::models::Commit]>,
+    commit_files: Option<&[Vec<String>]>,
+) -> Vec<String> {
     let Some(id) = gitx_git::models::ObjectId::from_hex(oid) else {
         return vec![format!("invalid object id `{oid}`")];
     };
@@ -1024,6 +1147,20 @@ fn render_commit_detail(repo: &gitx_git::Repository, oid: &str) -> Vec<String> {
                 .join(" ")
         ));
     }
+    // Classification (docs/07 §6, docs/10 §7 — heuristic, labeled as such).
+    use gitx_core::types::CommitClassification as CC;
+    let class = match gitx_analysis::classify_commit_message(&commit.message) {
+        CC::Feature => "feature",
+        CC::Fix => "fix",
+        CC::Refactor => "refactor",
+        CC::Docs => "docs",
+        CC::Test => "test",
+        CC::Chore => "chore",
+        CC::Revert => "revert",
+        CC::Merge => "merge",
+        CC::Unknown => "unknown",
+    };
+    out.push(format!("Classification: {class} (heuristic)"));
     out.push(String::new());
     for line in commit.message.lines() {
         out.push(format!("    {line}"));
@@ -1044,14 +1181,84 @@ fn render_commit_detail(repo: &gitx_git::Repository, oid: &str) -> Vec<String> {
             change.path.display()
         ));
     }
+
+    // Related history + affected contributors (docs/08 §3, docs/07 §6):
+    // computed from the per-commit changed-file sets loaded with the
+    // timeline, when available.
+    if let Some((related, contributors)) = related_and_contributors(&commit, timeline, commit_files)
+    {
+        if !related.is_empty() {
+            out.push(String::new());
+            out.push(" Related history (commits touching the same files):".to_string());
+            for (short_oid, overlap) in related.iter().take(6) {
+                out.push(format!(
+                    "  {short_oid}  ({} shared file{})",
+                    overlap,
+                    if *overlap == 1 { "" } else { "s" }
+                ));
+            }
+        }
+        if !contributors.is_empty() {
+            out.push(String::new());
+            out.push(" Affected contributors:".to_string());
+            for name in contributors.iter().take(6) {
+                out.push(format!("  {name}"));
+            }
+        }
+    }
     out
+}
+
+/// (related commits with shared-file counts, contributor names) — the
+/// commit-detail enrichment result (docs/07 §6, docs/08 §3).
+type RelatedAndContributors = (Vec<(String, usize)>, Vec<String>);
+
+/// Related commits (by shared-file overlap) and their authors, from the
+/// precomputed per-commit changed-file sets. `None` when the sets are
+/// unavailable (cache path).
+fn related_and_contributors(
+    commit: &gitx_git::models::Commit,
+    timeline: Option<&[gitx_git::models::Commit]>,
+    commit_files: Option<&[Vec<String>]>,
+) -> Option<RelatedAndContributors> {
+    let files = commit_files?;
+    let timeline = timeline?;
+    let index = timeline.iter().position(|c| c.id == commit.id)?;
+    let selected = files.get(index)?;
+    if selected.is_empty() {
+        return Some((Vec::new(), Vec::new()));
+    }
+    let selected_set: std::collections::HashSet<&String> = selected.iter().collect();
+    let mut related: Vec<(String, usize)> = Vec::new();
+    let mut contributors: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (i, c) in timeline.iter().enumerate() {
+        if i == index {
+            continue;
+        }
+        let Some(other) = files.get(i) else { continue };
+        let overlap = other.iter().filter(|f| selected_set.contains(f)).count();
+        if overlap > 0 {
+            related.push((short(&c.id), overlap));
+            let key = format!("{} <{}>", c.author.name, c.author.email);
+            if seen.insert(key) {
+                contributors.push(c.author.name.clone());
+            }
+        }
+    }
+    related.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    Some((related.into_iter().take(6).collect(), contributors))
 }
 
 /// Render a file's lineage (docs/10 file archaeology, docs/08 File view):
 /// creation commit, first/last change, every rename event, and each commit
 /// that touched it — following renames backward from HEAD. Mirrors
 /// `gitx lineage <path>`.
-fn render_file_detail(repo: &gitx_git::Repository, path: &std::path::Path) -> Vec<String> {
+fn render_file_detail(
+    repo: &gitx_git::Repository,
+    path: &std::path::Path,
+    hotspots: Option<&gitx_analysis::RepoAnalysis>,
+) -> Vec<String> {
     use gitx_history::lineage::{FileAction, FileLineageNode};
 
     let service = gitx_history::timeline::HistoryService::new(repo);
@@ -1084,14 +1291,69 @@ fn render_file_detail(repo: &gitx_git::Repository, path: &std::path::Path) -> Ve
             String::new()
         }
     ));
+
+    // Contributors + churn (docs/08 File view): distinct authors across the
+    // lineage and the total insertions/deletions those commits made.
+    let mut authors: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut ins: u32 = 0;
+    let mut del: u32 = 0;
+    for node in &lineage.history {
+        if let Ok(c) = repo.find_commit(node.commit_id) {
+            let key = format!("{} <{}>", c.author.name, c.author.email);
+            if seen.insert(key) {
+                authors.push(c.author.name.clone());
+            }
+            let parent_tree = match c.parents.first() {
+                Some(parent) => repo.find_commit(*parent).ok().map(|p| p.tree_id),
+                None => None,
+            };
+            if let Ok(changes) = repo.diff_tree_to_tree(parent_tree, c.tree_id) {
+                ins += changes.iter().map(|ch| ch.insertions).sum::<u32>();
+                del += changes.iter().map(|ch| ch.deletions).sum::<u32>();
+            }
+        }
+    }
+    authors.sort();
+    out.push(format!(
+        "  Contributors ({})  ·  churn: {ins} insertions, {del} deletions across {} commit(s)",
+        authors.len(),
+        lineage.history.len()
+    ));
+    if !authors.is_empty() {
+        out.push(format!("    {}", authors.join(", ")));
+    }
+
+    // Hotspot metrics (docs/08 File view) from the live analysis, when the
+    // path is present in it.
+    if let Some(a) = hotspots {
+        let canonical = path.to_string_lossy().replace('\\', "/");
+        if let Some(f) = a
+            .files
+            .iter()
+            .find(|f| f.path.to_string_lossy().replace('\\', "/") == canonical)
+        {
+            let churn = f.metrics.lines_added + f.metrics.lines_deleted;
+            out.push(format!(
+                "  Hotspot: {:.0}/100 ({})  ·  {} changes  ·  {} churn  ·  {} author(s)  ·  {:.0}% owned",
+                f.hotspot,
+                severity_label(f.hotspot),
+                f.metrics.change_frequency,
+                churn,
+                f.metrics.unique_contributors,
+                f.ownership_concentration
+            ));
+        }
+    }
     out.push(String::new());
 
-    let badge = |action: &FileAction| -> &'static str {
+    let badge = |action: &FileAction| -> String {
         match action {
-            FileAction::Added => "ADDED   ",
-            FileAction::Modified => "MODIFIED",
-            FileAction::Deleted => "DELETED ",
-            FileAction::Renamed { .. } => "RENAMED ",
+            FileAction::Added { copy_of: Some(src) } => format!("COPIED from {}", src.display()),
+            FileAction::Added { copy_of: None } => "ADDED   ".to_string(),
+            FileAction::Modified => "MODIFIED".to_string(),
+            FileAction::Deleted => "DELETED ".to_string(),
+            FileAction::Renamed { .. } => "RENAMED ".to_string(),
         }
     };
     let describe = |n: &FileLineageNode| -> String {
@@ -1130,6 +1392,20 @@ fn author_of(repo: &gitx_git::Repository, id: &gitx_git::models::ObjectId) -> St
     repo.find_commit(*id)
         .map(|c| c.author.name)
         .unwrap_or_else(|_| "-".into())
+}
+
+/// Risk band label for a hotspot score (docs/10 §2: 0–30 low, 31–60 medium,
+/// 61–80 high, 81–100 critical).
+fn severity_label(score: f64) -> &'static str {
+    if score >= 80.0 {
+        "CRITICAL"
+    } else if score >= 60.0 {
+        "HIGH"
+    } else if score >= 30.0 {
+        "MEDIUM"
+    } else {
+        "LOW"
+    }
 }
 
 fn ts(seconds: i64) -> String {

@@ -71,10 +71,13 @@ fn handle_mouse(app: &mut App, search_mode: &bool, mouse: crossterm::event::Mous
                 }
             }
         }
-        // Sidebar is the first 20 columns. Row 1 = header offset, each nav
-        // item is one row inside the bordered list.
+        // Sidebar occupies the first `sidebar_width` columns (docs/08 §5
+        // responsive layout: the width adapts to the terminal). Row 1 = header
+        // offset, each nav item is one row inside the bordered list.
         MouseEventKind::Down(MouseButton::Left)
-            if mouse.column < 20 && mouse.row >= 3 && mouse.row <= 16 =>
+            if mouse.column < crate::ui::sidebar_width(app.width)
+                && mouse.row >= 3
+                && mouse.row <= 16 =>
         {
             app.nav_index = (mouse.row - 3) as usize;
             app.select_nav();
@@ -115,7 +118,10 @@ fn handle_key(app: &mut App, search_mode: &mut bool, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => app.quit(),
         KeyCode::Esc => {
-            if app.show_help {
+            // Esc cancels an in-flight reload (docs/08 §6 cancellation hint).
+            if app.loading {
+                app.cancel_loading();
+            } else if app.show_help {
                 app.show_help = false;
             } else if app.error.is_some() {
                 app.error = None;

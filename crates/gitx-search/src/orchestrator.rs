@@ -11,6 +11,12 @@ pub trait SearchBackend {
     fn search_authors(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, SearchError>;
     fn search_branches(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, SearchError>;
     fn search_tags(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, SearchError>;
+    /// Rename history (old + new paths, docs/11 §4 `--renames`).
+    fn search_renames(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, SearchError>;
+    /// Symbols extracted from source (docs/11 §2 `symbol` entity).
+    fn search_symbols(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, SearchError>;
+    /// Directories that contain matching paths (docs/11 §2 `directory`).
+    fn search_directories(&self, query: &SearchQuery) -> Result<Vec<SearchResult>, SearchError>;
 }
 
 /// Orchestrator to route queries to the correct backend and aggregate & rank results
@@ -36,6 +42,18 @@ impl<B: SearchBackend> SearchOrchestrator<B> {
             results.extend(self.backend.search_files(query)?);
         }
 
+        if filters.renames {
+            results.extend(self.backend.search_renames(query)?);
+        }
+
+        if filters.symbols {
+            results.extend(self.backend.search_symbols(query)?);
+        }
+
+        if filters.directories {
+            results.extend(self.backend.search_directories(query)?);
+        }
+
         if filters.authors {
             results.extend(self.backend.search_authors(query)?);
         }
@@ -48,7 +66,7 @@ impl<B: SearchBackend> SearchOrchestrator<B> {
             results.extend(self.backend.search_tags(query)?);
         }
 
-        rank_results(&mut results);
+        rank_results(&mut results, &query.term);
 
         Ok(results)
     }

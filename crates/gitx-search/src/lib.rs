@@ -1,9 +1,11 @@
+pub mod code;
 pub mod filter;
 pub mod orchestrator;
 pub mod query;
 pub mod ranking;
 pub mod result;
 
+pub use code::*;
 pub use filter::*;
 pub use orchestrator::*;
 pub use query::*;

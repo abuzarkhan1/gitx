@@ -8,6 +8,10 @@ pub struct SearchFilters {
     pub renames: bool,
     pub code: bool,
     pub history: bool,
+    /// Search symbols extracted from source (docs/11 §2).
+    pub symbols: bool,
+    /// Search directories containing matching paths (docs/11 §2).
+    pub directories: bool,
     pub since: Option<String>,
     pub author: Option<String>,
 }
@@ -21,7 +25,9 @@ impl SearchFilters {
             || self.tags
             || self.renames
             || self.code
-            || self.history)
+            || self.history
+            || self.symbols
+            || self.directories)
     }
 
     /// If no explicit types are requested, enable a default broad search
@@ -32,6 +38,8 @@ impl SearchFilters {
             self.branches = true;
             self.tags = true;
             self.authors = true;
+            self.symbols = true;
+            self.directories = true;
         }
         self
     }

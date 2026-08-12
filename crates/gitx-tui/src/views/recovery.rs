@@ -19,10 +19,11 @@ pub fn render(
         Some(r) => {
             let mut out = vec![theme::strong(
                 format!(
-                    "Reflog: {} entries{}  |  Unreachable commits: {}",
+                    "Reflog: {} entries{}  |  Unreachable commits: {}  |  Dangling objects: {}",
                     r.reflog.len(),
                     if r.reflog_enabled { "" } else { " (disabled)" },
-                    r.unreachable.len()
+                    r.unreachable.len(),
+                    r.dangling.len()
                 ),
                 Color::Cyan,
             )];
@@ -53,9 +54,37 @@ pub fn render(
                     out.push(theme::plain(format!("  {}", c.oid)));
                 }
             }
-            if r.reflog.is_empty() && r.unreachable.is_empty() {
+            // Dangling trees/blobs (docs/08 §3 Recovery, docs/12 §6): objects
+            // present in the object database but not reachable from any ref.
+            // The header line already counts them via the count in the title.
+            if !r.dangling.is_empty() {
+                out.push(theme::strong(
+                    format!(
+                        "Dangling objects ({} trees, {} blobs):",
+                        r.dangling
+                            .iter()
+                            .filter(|d| matches!(d.kind, gitx_analysis::DanglingKind::Tree))
+                            .count(),
+                        r.dangling
+                            .iter()
+                            .filter(|d| matches!(d.kind, gitx_analysis::DanglingKind::Blob))
+                            .count()
+                    ),
+                    Color::Magenta,
+                ));
+                for d in r.dangling.iter().take(200) {
+                    out.push(Line::from(vec![
+                        Span::styled(
+                            format!("  {:<5} ", d.kind),
+                            Style::default().fg(Color::Magenta),
+                        ),
+                        Span::styled(d.oid.to_string(), Style::default().fg(Color::DarkGray)),
+                    ]));
+                }
+            }
+            if r.reflog.is_empty() && r.unreachable.is_empty() && r.dangling.is_empty() {
                 out.push(theme::plain(
-                    "Nothing to recover — reflogs empty and no unreachable commits.",
+                    "Nothing to recover — reflogs empty, no unreachable commits, no dangling objects.",
                 ));
             }
             out

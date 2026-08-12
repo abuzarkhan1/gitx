@@ -83,6 +83,7 @@ fn bench_services(c: &mut Criterion) {
                 SearchService::new(&repo)
                     .search(
                         "\"workspace\"",
+                        "workspace",
                         &SearchOptions {
                             commits: true,
                             files: true,

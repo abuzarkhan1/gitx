@@ -24,7 +24,7 @@ pub fn render(
         Style::default().fg(Color::White)
     };
     let block = Block::default()
-        .title(" Search (FTS: commits · files · authors · branches · tags) ")
+        .title(" Search (commits · files · authors · branches · tags · renames · symbols · code) ")
         .borders(Borders::ALL)
         .style(border_style);
     let inner = block.inner(area);
@@ -56,8 +56,12 @@ pub fn render(
     );
     let rows: Vec<Line<'static>> = if query.trim().is_empty() {
         vec![
-            theme::plain("Type to search across commits, files, authors, branches and tags"),
-            theme::dim("(SQLite FTS5 over the index — Enter opens the selected result.)"),
+            theme::plain(
+                "Type to search across commits, files, authors, branches, tags, symbols and code",
+            ),
+            theme::dim(
+                "(SQLite FTS5 over the index + bounded code scan — Enter opens the result.)",
+            ),
         ]
     } else if pending {
         vec![theme::dim("Searching the index…")]
@@ -72,12 +76,16 @@ pub fn render(
                 let mut out = Vec::new();
                 for (i, hit) in list.iter().enumerate() {
                     let (badge, color) = match hit.scope.as_str() {
-                        "commit" => ("commit ", Color::Cyan),
-                        "file" => ("file   ", Color::Green),
-                        "author" => ("author ", Color::Magenta),
-                        "branch" => ("branch ", Color::Yellow),
-                        "tag" => ("tag    ", Color::Blue),
-                        _ => ("       ", Color::DarkGray),
+                        "commit" => ("commit   ", Color::Cyan),
+                        "file" => ("file     ", Color::Green),
+                        "author" => ("author   ", Color::Magenta),
+                        "branch" => ("branch   ", Color::Yellow),
+                        "tag" => ("tag      ", Color::Blue),
+                        "symbol" => ("symbol   ", Color::LightRed),
+                        "directory" => ("directory", Color::DarkGray),
+                        "rename" => ("rename   ", Color::LightBlue),
+                        "code" => ("code     ", Color::LightGreen),
+                        _ => ("         ", Color::DarkGray),
                     };
                     let detail = if hit.detail.is_empty() {
                         String::new()

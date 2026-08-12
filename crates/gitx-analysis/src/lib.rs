@@ -10,6 +10,8 @@ pub mod pipeline;
 pub mod recovery;
 pub mod regressions;
 pub mod stats;
+pub mod structure;
+pub mod symbols;
 
 // Re-export common types
 pub use branch::{BranchIntelligence, analyze_branch};

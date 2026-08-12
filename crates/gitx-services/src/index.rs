@@ -284,6 +284,42 @@ pub fn build_index(conn: &mut rusqlite::Connection, repo: &Repository) -> anyhow
             stmt_tag.execute(rusqlite::params![tag.name, tag.target.to_string()])?;
         }
 
+        // Symbols from heuristic source extraction (docs/11 §2, docs/21 Stage
+        // 6): populated so `gitx search --symbols` works against the index.
+        {
+            let mut file_ids: std::collections::HashMap<String, i64> =
+                std::collections::HashMap::new();
+            {
+                let mut stmt = tx.prepare("SELECT id, path FROM files")?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })?;
+                for row in rows {
+                    let (id, path) = row?;
+                    file_ids.insert(path, id);
+                }
+            }
+            tx.execute("DELETE FROM symbols", [])?;
+            let mut stmt_symbol = tx.prepare_cached(
+                "INSERT INTO symbols (file_id, name, kind, line) VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for (path, syms) in
+                gitx_analysis::symbols::extract_symbols_from_tree(repo, head_commit.tree_id)?
+            {
+                let Some(file_id) = file_ids.get(&path.display().to_string()) else {
+                    continue;
+                };
+                for s in syms.iter().take(400) {
+                    stmt_symbol.execute(rusqlite::params![
+                        file_id,
+                        s.name,
+                        s.kind,
+                        s.line as i64,
+                    ])?;
+                }
+            }
+        }
+
         // Freshness metadata (docs/09 §5).
         tx.execute(
             "INSERT INTO index_metadata (key, value) VALUES (?1, ?2) \

@@ -18,10 +18,10 @@ audit. Legend:
 | 05-DOMAIN-MODEL | ✅ | Entities present; identity normalization + config user-mapping (docs/05 §3) implemented and applied in `gitx contributors` |
 | 06-DATABASE-SCHEMA | ✅ | v1–v3 migrations: all documented tables incl. FTS5 + corrected triggers |
 | 07-CLI-SPECIFICATION | ✅ | Full surface + JSON + completions + exit codes 1–7; `release <TAG>`, `architecture --from/--to`, `search --since/--code`, blame `--limit` (docs/07 updated) |
-| 08-TUI-SPECIFICATION | ✅ | All 14 views + drill-down + help overlay + `r`/`?` + small-terminal guard + background loading + **polish pass**: Overview charts (activity bar chart, language bars, health gauges, contributor bars, hotspot bars, repo-size gauge), full color hierarchy (severity/health/recency/diff colors, high-contrast selection, themed header+breadcrumb), plain-language explanations per metric + health verdict, consistent empty states, mouse support (wheel + sidebar click), view-jump keys (o/t/c/b/f/u/s/w/a/d/x/e/v, 1–9), sortable Hotspots (`s`), async FTS search with cursor + pending state, commit-graph timeline, ahead/behind bars, ownership bars, scroll-position indicator, `GITX_THEME`/`[ui] theme` |
+| 08-TUI-SPECIFICATION | ✅ | All 14 views + drill-down + help overlay + `r`/`?` + small-terminal guard + background loading + **polish pass**: Overview charts (activity bar chart, language bars, health gauges, contributor bars, hotspot bars, repo-size gauge), full color hierarchy (severity/health/recency/diff colors, high-contrast selection, themed header+breadcrumb), plain-language explanations per metric + health verdict, consistent empty states, mouse support (wheel + sidebar click), view-jump keys (o/t/c/b/f/u/s/w/a/d/x/e/v, 1–9), sortable Hotspots (`s`), async FTS search with cursor + pending state, commit-graph timeline, ahead/behind bars, ownership bars, scroll-position indicator, `GITX_THEME`/`[ui] theme` + **audit pass**: responsive sidebar (width-adaptive + truncation), loader stage + step/total + Esc-cancel, structured Reason/Suggested-action errors, Recovery dangling objects, branch divergence/shared-files/stale, file-detail contributors/churn/hotspot metrics |
 | 09-INDEXING-ENGINE | ✅ | scan/refresh real; progress, Ctrl-C cancellation, atomic rebuild, corruption detection (exit 5), tag/reflog upsert, rewritten-history detection (HEAD-ref tracked, warning + meta flag) |
-| 10-ANALYSIS-ENGINE | ✅ | + branch intelligence (ahead/behind/age/shared/merge-complexity), subsystem + knowledge + inactive ownership, release depth, risk/health formula+window, dependency usage + churn (`gitx dependencies usage`) |
-| 11-SEARCH-SPECIFICATION | 🟡 | FTS5 + filters + JSON + `--since`/`--author` + `--code` + **TUI search now queries FTS across all scopes** (via `SearchService`); ranking is bm25-only |
+| 10-ANALYSIS-ENGINE | ✅ | + branch intelligence (ahead/behind/age/shared/merge-complexity), subsystem + knowledge + inactive ownership, release depth, risk/health formula+window, dependency usage + churn (`gitx dependencies usage`) + **audit pass**: architecture milestones + dependency-direction changes (`structure`), manifest depth (direct/indirect, cargo features, pnpm catalogs), commit classification/related-history/affected-contributors, `history --follow`, copy lineage |
+| 11-SEARCH-SPECIFICATION | ✅ | FTS5 + filters + JSON + `--since`/`--author` + `--code` + **audit pass**: `--renames`/`--history` query the rename tables, symbol + directory entities (CLI + TUI), tiered ranking (exact → path/name → recent → FTS), bounded code search with HEAD-tree fallback + cap note |
 | 12-RECOVERY-SPECIFICATION | ✅ | + `recovery export` patch, last-known-ref/reason/age presentation, GC warning, dangling trees/blobs (bounded reachability walk) |
 | 13-PERFORMANCE-ENGINEERING | 🟡 | Bounded rayon walk (now fold/reduce — per-worker memory bounded, diffs not all held in RAM) + criterion benches (analysis, services) + index-backed stats/overview/analysis with live fallback; large-diff streaming still open |
 | 14-TESTING-STRATEGY | ✅ | 83 tests incl. failure + property + edge-case + **services/consistency** (incremental-from-empty == full build == git count); `tests/fixtures/` documented with a deterministic `build.sh` |
@@ -31,7 +31,7 @@ audit. Legend:
 | 18-RELEASE-ENGINEERING | ✅ | cargo-dist + workflow + checksums + release-check.sh + newer-schema detection (exit 5, explained message) |
 | 19-QUALITY-GATES | ✅ | `scripts/check.sh` (fmt+clippy+check+test) + CI workflow with matrix |
 | 20-ADR | ✅ | Decisions respected (e.g. analysis subdomains stay in `gitx-analysis`) |
-| 21-ROADMAP | 🟡 | Stages 1–5 landed; Stage 6 (symbols/Tree-sitter/graphs) and Stage 7 polish pending |
+| 21-ROADMAP | 🟡 | Stages 1–5 landed; **Stage 6 symbols landed** (heuristic extractor + `gitx symbols` + index symbols); Tree-sitter still deferred (ADR-011 Proposed), structural graphs remain unconsumed stubs |
 | 22-CONTRIBUTING | ✅ | Docs only; §5 tracing requirement now met (see docs/03) |
 | 23-FEATURE-MATRIX | ✅ | All feature rows done; “Persistent Index” column honored — stats/overview/hotspots/risk/health read the index with live fallback |
 | 24-DATA-FLOW-AND-ALGORITHMS | ✅ | Timeline, blame, diff stats, recovery, lineage follow the documented algorithms |
@@ -445,6 +445,77 @@ clean, `cargo fmt` clean.
   sequences, captures frames, and asserts all 39 polish markers (charts,
   gauges, colors via 256-color escapes, hints, ranges, related-commits,
   lineage, sort, themes, Ctrl+C).
+
+## Sixth implementation pass (20-point audit closed)
+
+A line-by-line audit of docs/01–27 against the code (see the matrix above)
+produced a 20-point gap list; **every point is now implemented and verified**
+(`scripts/check.sh` green: 83+ tests, clippy `-D warnings`, fmt; `verify-tui.sh`
+39/39).
+
+### Search (docs/11) — points 1–3, 17–18
+- **Dead flags wired** — `--renames` / `--history` now actually query the
+  rename-history tables (`file_renames`) instead of being parsed-and-ignored.
+- **Symbol & directory entities** — `gitx search --symbols` / `--directories`
+  (CLI + TUI) query the `symbols` table (populated during index build) and
+  directory aggregation; new `EntityType::Symbol/Directory` and scopes.
+- **Tiered ranking (docs/11 §8)** — exact → path/name → recent → FTS score,
+  deterministic, in `gitx-search/src/ranking.rs` (replaces the bm25-only stub).
+- **Code search with HEAD-tree fallback (points 17–18)** — shared
+  `gitx_search::search_code_content` (bounded worktree walk, `.git`/binary/
+  NUL skip, 50-result cap) with a **HEAD-tree fallback** for bare repos, plus
+  an explicit bound note in CLI output ("code content searched in the working
+  tree (N files); capped").
+
+### Structure & symbols (docs/02, 21; ADR-011) — points 4–6
+- **Heuristic symbol extractor** (`gitx_analysis::symbols`, dependency-free)
+  covering Rust/Go/JS/TS/Python/Kotlin/C/C++/Java; `gitx symbols` command;
+  symbols populated in the persisted index.
+- **Architecture milestones** — `gitx architecture milestones` detects
+  initial commit, first tag, module additions, structural refactors, and
+  **dependency-direction flips** (`gitx_analysis::structure`);
+  `architecture diff` reports direction changes.
+- Tree-sitter remains optional (ADR-011 Proposed) — the matrix now says so
+  instead of claiming it is implemented.
+
+### Dependencies (docs/10 §11) — point 7
+- Direct vs transitive classification (`manifest::is_direct`), Cargo
+  `[features]` (`manifest::cargo_features`), pnpm `catalogs:`
+  (`manifest::pnpm_catalogs`); `gitx dependencies features` subcommand;
+  direct/indirect markers in `gitx dependencies` output.
+
+### Commit detail & lineage (docs/07 §6–7, docs/02 §2) — points 8–10
+- `gitx commit` and the TUI commit detail now show **classification**
+  (heuristic), **related history** (shared-file overlap) and **affected
+  contributors**.
+- `gitx history --follow` follows renames via the lineage engine (was a
+  no-op flag).
+- **Copy lineage** — `FileAction::Added { copy_of }` detects blob-equality
+  copies at file birth (CLI lineage + TUI file detail badge it).
+
+### TUI (docs/08) — points 11–16
+- **Responsive layout (§5)** — sidebar width adapts (20/16/12 by terminal
+  width) with truncated labels; content keeps the space; mouse clicks track
+  the live width.
+- **Loading states (§6)** — the status bar now shows the loader **stage +
+  step/total** (e.g. "Analyzing hotspots & health (3/7)") and an **Esc to
+  cancel** hint; Esc genuinely cancels the load (results discarded).
+- **Error format (§8)** — the error overlay is now structured: "Reason:" +
+  heuristic "Suggested action:" (repo-not-found, schema mismatch,
+  permissions, locks) instead of a bare string.
+- **Recovery dangling objects** — the Recovery panel now lists dangling
+  trees/blobs with counts (docs/12 §6), not just reflog + unreachable.
+- **Branch divergence & shared files** — each branch row now shows
+  "diverged N | M shared files" and a `[stale]` marker.
+- **File-detail metrics** — the file detail now shows contributors, churn
+  (insertions/deletions across the lineage) and hotspot metrics
+  (score/band, changes, ownership %) per docs/08 §3.
+
+### Docs — points 19–20
+- docs/23 feature matrix corrected (symbol search/rename/code rows added,
+  tree-sitter marked not-implemented with a note).
+- docs/18 §9 Installation rewritten with real binary-download, source-build
+  and shell-completion steps.
 
 ## Remaining gaps — complete line-by-line audit (docs ⇄ code)
 

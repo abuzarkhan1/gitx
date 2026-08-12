@@ -157,6 +157,14 @@ pub enum Commands {
         #[arg(long, default_value_t = 2000)]
         max: usize,
     },
+    /// Source symbols extracted from HEAD (heuristic; docs/21 Stage 6).
+    Symbols {
+        /// Restrict to a path prefix.
+        #[arg(long)]
+        path: Option<String>,
+    },
+    /// Module/file dependency graph of the HEAD tree (docs/21 Stage 6).
+    Graph,
     /// Search commits, files, authors, branches and tags.
     Search {
         query: String,
@@ -187,6 +195,12 @@ pub enum Commands {
         /// Include history (commits + files).
         #[arg(long)]
         history: bool,
+        /// Search symbols extracted from source (docs/11 §2).
+        #[arg(long)]
+        symbols: bool,
+        /// Search directories containing matching paths (docs/11 §2).
+        #[arg(long)]
+        directories: bool,
         /// Restrict commit search to an author.
         #[arg(long)]
         author: Option<String>,
@@ -234,6 +248,8 @@ pub enum DependenciesAction {
     Diff { from: String, to: String },
     /// Show the workspace layout (root + members) for monorepos.
     Workspace,
+    /// Cargo feature flags + pnpm catalogs declared in HEAD (docs/10 §11).
+    Features,
     /// Dependency usage + churn: how many files reference each dependency,
     /// and how often it was added/removed/version-changed (docs/10 §11).
     Usage {
@@ -249,6 +265,14 @@ pub enum ArchitectureAction {
     Overview,
     /// Structural diff between two commits (docs/07 §11, docs/10 §10).
     Diff { from: String, to: String },
+    /// Detect architectural milestones from history (docs/10 §10): initial
+    /// commit, first release tag, module additions, structural refactors,
+    /// and dependency-direction changes.
+    Milestones {
+        /// Maximum number of commits to walk (newest first).
+        #[arg(long, default_value_t = 1000)]
+        max: usize,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone, Copy)]

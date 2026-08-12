@@ -4,7 +4,7 @@ use gitx_git::models::Branch;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 
@@ -48,7 +48,10 @@ pub fn render(
                     Style::default().fg(theme::global().fg),
                 )];
 
-                // Ahead/behind vs the current branch, with a visual bar.
+                // Ahead/behind vs the current branch, with a visual bar
+                // (docs/08 Branch view), plus divergence and shared files
+                // (docs/10 §5): how far the branch has split from the base
+                // and how many files both sides have changed.
                 if let Some(Some(bi)) = intel.and_then(|list| list.get(i)) {
                     let total = (bi.ahead + bi.behind).max(1);
                     let width = 12usize;
@@ -64,9 +67,23 @@ pub fn render(
                         Color::DarkGray
                     };
                     spans.push(Span::styled(
-                        format!(" [{bar}] ahead {} behind {}", bi.ahead, bi.behind),
+                        format!(
+                            " [{bar}] ahead {} behind {} | diverged {} | {} shared file{}",
+                            bi.ahead,
+                            bi.behind,
+                            bi.diverged_commits,
+                            bi.shared_files,
+                            if bi.shared_files == 1 { "" } else { "s" }
+                        ),
                         Style::default().fg(color),
                     ));
+                    // Staleness marker (docs/10 §5): stale branches stand out.
+                    if bi.is_stale {
+                        spans.push(Span::styled(
+                            "  [stale]",
+                            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                        ));
+                    }
                 }
 
                 // Staleness color (docs/10 §5): green <30d, yellow 30–90d, red >90d.
@@ -81,7 +98,7 @@ pub fn render(
     common::render_scrollable(
         f,
         area,
-        " Branches — age · activity · ahead/behind vs current ",
+        " Branches — age · activity · ahead/behind · divergence · shared files ",
         &rows,
         scroll,
         selected,

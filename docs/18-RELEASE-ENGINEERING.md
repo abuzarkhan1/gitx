@@ -86,9 +86,65 @@ Breaking JSON schema changes require a versioning decision.
 
 ## 9. Installation
 
-Document at least:
+GitX ships two binaries: `gitx` (CLI) and `gitx-tui` (terminal UI).
 
-- binary download
-- package-manager installation if later available
-- source build
-- shell completion
+### Binary download
+
+Tagged releases publish prebuilt binaries for macOS (arm64/x86_64), Linux
+(arm64/x86_64) and Windows, plus a `checksums.txt` with SHA-256 hashes (see
+docs/27 §3 for the exact release flow). Download the archive for your
+platform from the GitHub Release page, verify it against `checksums.txt`, and
+put the binary on your `PATH`, e.g.:
+
+```bash
+# macOS (arm64)
+curl -sSLo gitx.tar.gz https://github.com/USER/gitx/releases/latest/download/gitx-aarch64-apple-darwin.tar.gz
+shasum -a 256 -c checksums.txt   # or: sha256sum -c checksums.txt
+sudo tar -xzf gitx.tar.gz -C /usr/local/bin
+```
+
+Verify the installation:
+
+```bash
+gitx --version
+gitx-tui --version
+gitx completions bash > /tmp/gitx.bash   # optional, see below
+```
+
+### Package-manager installation (later)
+
+Package-manager distribution (Homebrew formula, cargo-dist installers) is
+planned but not yet published; see docs/27 §3 and docs/26 for status. Until
+then, use the binary download or a source build below.
+
+### Source build
+
+Requires a Rust toolchain (stable, per docs/03).
+
+```bash
+git clone <repo-url> gitx && cd gitx
+cargo build --release --workspace
+# binaries land in target/release/gitx and target/release/gitx-tui
+cp target/release/gitx target/release/gitx-tui /usr/local/bin/
+```
+
+Or install both binaries directly:
+
+```bash
+cargo install --path crates/gitx-cli --locked
+cargo install --path crates/gitx-tui --locked
+```
+
+### Shell completion
+
+`gitx completions <shell>` emits completion scripts for bash, zsh, fish and
+PowerShell (docs/07 §20):
+
+```bash
+gitx completions bash  > /usr/local/etc/bash_completion.d/gitx   # bash
+gitx completions zsh   > "${fpath[1]}/_gitx"                    # zsh
+gitx completions fish  > ~/.config/fish/completions/gitx.fish   # fish
+```
+
+(Requires the completed command names; the TUI binary `gitx-tui` has no
+separate CLI surface to complete.)

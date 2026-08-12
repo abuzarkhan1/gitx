@@ -103,6 +103,7 @@ fn search_service_queries_across_scopes() {
     let hits = service
         .search(
             "\"workspace\"",
+            "workspace",
             &SearchOptions {
                 commits: true,
                 ..Default::default()
@@ -118,6 +119,7 @@ fn search_service_queries_across_scopes() {
     let hits = service
         .search(
             "\"README\"",
+            "README",
             &SearchOptions {
                 files: true,
                 ..Default::default()
