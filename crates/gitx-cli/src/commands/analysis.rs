@@ -315,7 +315,11 @@ pub fn ownership(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
 
 /// Run the analysis through `AnalysisService` (docs/04 §6): index-backed
 /// when fresh, live otherwise. `--no-cache` forces the live path.
+/// Auto-refreshes a stale index first so the cached analysis is used
+/// instead of recomputing live from Git (docs/16 `[index] auto_refresh`,
+/// docs/13 §3).
 fn analyze(cli: &Cli, repo: &gitx_git::Repository) -> anyhow::Result<gitx_analysis::RepoAnalysis> {
+    crate::commands::ensure_fresh_index(cli, repo)?;
     gitx_services::AnalysisService::new(repo).analyze(!cli.no_cache, weights(cli))
 }
 

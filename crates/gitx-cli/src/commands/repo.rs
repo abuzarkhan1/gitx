@@ -128,6 +128,9 @@ pub fn status(cli: &Cli) -> anyhow::Result<()> {
 
 pub fn stats(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
+    // Auto-refresh (docs/16 `[index] auto_refresh`): a stale/absent index is
+    // rebuilt so stats read from SQLite in milliseconds (docs/13 §3).
+    crate::commands::ensure_fresh_index(cli, &repo)?;
     let service = RepositoryService::new(&repo);
     // Index-backed fast path (docs/13 §3): with a fresh index the statistics
     // come from SQLite in milliseconds instead of recomputing from Git.

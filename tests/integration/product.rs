@@ -20,6 +20,73 @@ fn bin() -> std::path::PathBuf {
 }
 
 #[test]
+fn auto_refresh_builds_the_index_on_first_analytical_command() {
+    let Some(repo) = FixtureRepo::new("product-autorefresh") else {
+        return;
+    };
+    repo.write("src/lib.rs", "pub fn a() {}\npub fn b() {}\n");
+    repo.commit("feat: initial");
+    repo.write(
+        "src/lib.rs",
+        "pub fn a() { println!(\"x\"); }\npub fn b() {}\n",
+    );
+    repo.commit("fix: a prints");
+
+    let out = Command::new(bin())
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("health")
+        .output()
+        .expect("gitx health runs");
+    assert!(out.status.success(), "health failed: {:?}", out.status);
+
+    let index = repo.path().join(".git/gitx/index.sqlite");
+    assert!(
+        index.exists(),
+        "auto_refresh (default true) must create the index on first analysis"
+    );
+    let out = Command::new(bin())
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("index")
+        .arg("status")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("2 commits"),
+        "index should hold 2 commits: {text}"
+    );
+}
+
+#[test]
+fn auto_refresh_false_skips_index_build() {
+    let Some(repo) = FixtureRepo::new("product-noautorefresh") else {
+        return;
+    };
+    repo.write("README.md", "# demo\n");
+    repo.commit("docs: readme");
+
+    std::fs::write(
+        repo.path().join("gitx.toml"),
+        "[index]\nauto_refresh = false\n",
+    )
+    .expect("write repo config");
+
+    let out = Command::new(bin())
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("health")
+        .output()
+        .expect("gitx health runs");
+    assert!(out.status.success(), "health failed: {:?}", out.status);
+    assert!(
+        !repo.path().join(".git/gitx/index.sqlite").exists(),
+        "auto_refresh=false must not create an index"
+    );
+}
+
+#[test]
 fn gitx_with_no_args_on_a_pipe_prints_a_snapshot() {
     let Some(repo) = FixtureRepo::new("product-noarg") else {
         return;

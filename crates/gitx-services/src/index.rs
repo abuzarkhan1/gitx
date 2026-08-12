@@ -129,6 +129,20 @@ impl<'a> IndexService<'a> {
         stored.as_deref() == Some(head.to_string().as_str())
     }
 
+    /// Incremental refresh when the persisted index is stale or absent
+    /// (docs/16 `[index] auto_refresh`): cheap when only HEAD moved, a full
+    /// build on first run. No-op when fresh. Used by the CLI and TUI so the
+    /// index builds itself instead of every analytical command recomputing
+    /// live from Git (docs/13 §3 sub-second reads).
+    pub fn refresh_if_stale(&self) -> anyhow::Result<()> {
+        if self.is_fresh() {
+            return Ok(());
+        }
+        let cancelled = AtomicBool::new(false);
+        self.scan_with(true, &cancelled)?;
+        Ok(())
+    }
+
     /// Commit count from the index; `Err` for a corrupt/newer-schema index
     /// (docs/09 §10, docs/18 §7 — surfaced as exit code 5 by the CLI).
     pub fn status(&self) -> anyhow::Result<u64> {

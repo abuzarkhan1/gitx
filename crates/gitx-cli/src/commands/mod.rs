@@ -149,6 +149,24 @@ pub fn run_dashboard_or_tui(cli: &Cli) -> anyhow::Result<()> {
     repo::snapshot(cli)
 }
 
+/// Honor `[index] auto_refresh` (docs/16 §3): before an index-backed
+/// command, refresh a stale/absent persisted index so analysis reads from
+/// SQLite instead of recomputing from Git. Skipped when indexing is
+/// disabled, auto-refresh is off, or `--no-cache` is given. Progress goes
+/// to stderr; stdout stays machine-clean.
+pub fn ensure_fresh_index(cli: &Cli, repo: &gitx_git::Repository) -> anyhow::Result<()> {
+    let config = crate::commands::config::load_config_for(cli, repo)?;
+    if !config.index.enabled || !config.index.auto_refresh || cli.no_cache {
+        return Ok(());
+    }
+    if crate::commands::index::index_is_fresh(repo) {
+        return Ok(());
+    }
+    eprintln!("indexing repository history (auto_refresh)…");
+    gitx_services::IndexService::new(repo).refresh_if_stale()?;
+    Ok(())
+}
+
 /// Open the repository from `--repo` or discover it from the current directory.
 pub fn open_repo(cli: &Cli) -> anyhow::Result<gitx_git::Repository> {
     match &cli.repo {
