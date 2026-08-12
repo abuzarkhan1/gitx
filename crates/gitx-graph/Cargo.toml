@@ -9,3 +9,5 @@ petgraph.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+gitx-git = { path = "../gitx-git" }
+gitx-analysis = { path = "../gitx-analysis" }

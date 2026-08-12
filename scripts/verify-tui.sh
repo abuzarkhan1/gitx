@@ -249,6 +249,12 @@ keys 'v' 0.5                           # Recovery
 snap 18_recovery
 check 18_recovery "Reflog:"           "recovery view"
 
+esc 0.3
+keys 'g' 0.6                           # Graph
+snap 19_graph
+check 19_graph "Modules — files, import & call edges" "graph module table (dir/file/import/call)"
+check 19_graph "Totals"                "graph totals line"
+
 # ── search (async FTS) ──────────────────────────────────────────────────
 esc 0.3
 keys '/' 0.4

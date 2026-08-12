@@ -16,6 +16,9 @@ pub enum View {
     Health,
     Recovery,
     Search,
+    /// Module graph summary (docs/21 Stage 6): per-directory file/import/call
+    /// counts from the shared HEAD-graph builder.
+    Graph,
     /// Commit or file detail opened from a list row (docs/08 drill-down).
     Detail,
 }
@@ -122,6 +125,8 @@ pub struct App {
     /// Architecture before/after comparison (docs/08 Architecture view,
     /// docs/10 §10): HEAD vs the newest commit ≥30 days old.
     pub arch_diff: Option<ArchDiff>,
+    /// Graph view rows: (directory, file count, import edges, call edges).
+    pub graph_summary: Option<Vec<(String, usize, usize, usize)>>,
     /// Spinner frame while the background loader runs (docs/08 loading
     /// progress: a real animated indicator, not just text).
     pub load_frame: u8,
@@ -211,6 +216,7 @@ impl App {
             visible: 1,
             commit_files: None,
             arch_diff: None,
+            graph_summary: None,
             load_frame: 0,
             nav_used: false,
             search_pending: false,
@@ -240,6 +246,7 @@ impl App {
         self.health_evidence = data.health_evidence;
         self.commit_files = data.commit_files;
         self.arch_diff = data.arch_diff;
+        self.graph_summary = data.graph_summary;
         self.loading = false;
         // Data changed: invalidate stale search results.
         self.search_results = None;
@@ -329,7 +336,7 @@ impl App {
     }
 
     pub fn next_nav(&mut self) {
-        if self.nav_index < 13 {
+        if self.nav_index < 14 {
             self.nav_index += 1;
         }
     }
@@ -356,6 +363,7 @@ impl App {
             11 => View::Health,
             12 => View::Recovery,
             13 => View::Search,
+            14 => View::Graph,
             _ => View::Overview,
         };
         // Enter opens the view: subsequent j/k scroll its content.
@@ -383,6 +391,7 @@ impl App {
             View::Health => 11,
             View::Recovery => 12,
             View::Search => 13,
+            View::Graph => 14,
             View::Detail => 13,
         };
     }
@@ -624,6 +633,8 @@ pub struct AppData {
     pub health_evidence: Vec<Vec<String>>,
     pub commit_files: Option<Vec<Vec<String>>>,
     pub arch_diff: Option<ArchDiff>,
+    /// Graph view rows: (directory, file count, import edges, call edges).
+    pub graph_summary: Option<Vec<(String, usize, usize, usize)>>,
 }
 
 /// Total loader stages reported by [`load_repo_stats`] (docs/08 §6
@@ -677,6 +688,7 @@ fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::at
                 health_evidence: Vec::new(),
                 commit_files: None,
                 arch_diff: None,
+                graph_summary: None,
             })));
             return;
         }
@@ -825,6 +837,9 @@ fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::at
     // HEAD vs the newest commit ≥30 days old (falling back to the oldest
     // commit in the window).
     let arch_diff = compute_arch_diff(&repo, timeline.as_deref()).ok().flatten();
+    // Module graph summary (docs/21 Stage 6): per-directory file/import/call
+    // counts for the Graph view, computed once here and cached.
+    let graph_summary = gitx_graph::graph::module_summary(&repo).ok();
 
     // Weekly commit counts, last 12 weeks (docs/08 Overview activity chart).
     let activity = timeline.as_ref().map(|commits| {
@@ -918,6 +933,7 @@ fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::at
         health_evidence,
         commit_files,
         arch_diff,
+        graph_summary,
     })));
 }
 

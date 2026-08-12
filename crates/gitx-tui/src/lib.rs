@@ -210,7 +210,7 @@ fn handle_key(app: &mut App, search_mode: &mut bool, key: KeyEvent) {
 
 /// View-jump shortcuts (docs/08 #18): o Overview, t Timeline, c Commits,
 /// b Branches, f Files, u Contributors, s Hotspots, w Ownership, a
-/// Architecture, d Dependencies, x Risk, e Health, v Recovery.
+/// Architecture, d Dependencies, x Risk, e Health, v Recovery, g Graph.
 fn jump_view(app: &mut App, c: char) {
     let view = match c {
         'o' => View::Overview,
@@ -226,6 +226,7 @@ fn jump_view(app: &mut App, c: char) {
         'x' => View::Risk,
         'e' => View::Health,
         'v' => View::Recovery,
+        'g' => View::Graph,
         _ => return,
     };
     app.current_view = view;

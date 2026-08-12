@@ -9,10 +9,12 @@ gitx-git = { path = "../crates/gitx-git" }
 gitx-history = { path = "../crates/gitx-history" }
 gitx-analysis = { path = "../crates/gitx-analysis" }
 gitx-index = { path = "../crates/gitx-index" }
+gitx-graph = { path = "../crates/gitx-graph" }
 gitx-services = { path = "../crates/gitx-services" }
 gitx-storage = { path = "../crates/gitx-storage" }
 rusqlite = { workspace = true }
 anyhow = { workspace = true }
+petgraph = { workspace = true }
 
 [[test]]
 name = "history_blame"
@@ -61,3 +63,7 @@ path = "integration/symbol_history.rs"
 [[test]]
 name = "diff"
 path = "integration/diff.rs"
+
+[[test]]
+name = "graph"
+path = "integration/graph.rs"

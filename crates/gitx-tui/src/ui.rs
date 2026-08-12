@@ -135,6 +135,7 @@ fn view_label(view: View) -> &'static str {
         View::Health => "Health",
         View::Recovery => "Recovery",
         View::Search => "Search",
+        View::Graph => "Graph",
         View::Detail => "Detail",
     }
 }
@@ -170,6 +171,7 @@ fn render_navigation(f: &mut Frame, app: &mut App, area: Rect) {
         "Health",
         "Recovery",
         "Search",
+        "Graph",
     ];
 
     // Truncate long labels on narrow terminals so nothing overflows the
@@ -285,6 +287,13 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             app.search_pending,
             app.search_results.as_deref(),
             app.in_content,
+            app.scroll,
+            app.selected,
+        ),
+        View::Graph => views::graph::render(
+            f,
+            area,
+            app.graph_summary.as_deref(),
             app.scroll,
             app.selected,
         ),

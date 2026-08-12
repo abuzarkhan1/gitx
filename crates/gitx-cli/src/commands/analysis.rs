@@ -1312,146 +1312,11 @@ pub fn symbol_history(cli: &Cli, name: &str, path: Option<&str>) -> anyhow::Resu
 }
 
 /// Module/file dependency graph of the HEAD tree (docs/21 Stage 6): builds a
-/// `gitx_graph::CodeGraph` (file + directory nodes, Contains + Imports edges)
-/// from the tree plus heuristic import scanning.
+/// `gitx_graph::CodeGraph` (file + directory nodes, Contains + Imports + Calls
+/// edges) through the shared builder.
 pub fn graph(cli: &Cli) -> anyhow::Result<()> {
     let repo = open_repo(cli)?;
-    let head = repo.head_commit_id()?;
-    let head_commit = repo.find_commit(head)?;
-
-    let mut graph = gitx_graph::graph::CodeGraph::new();
-    let mut import_edges: Vec<(String, String)> = Vec::new();
-
-    // File nodes + directory containment + import edges (heuristic).
-    let mut dirs: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for path in repo.list_blobs(head_commit.tree_id)? {
-        let path_str = path.display().to_string();
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path_str.clone());
-        graph.add_node(&path, name, gitx_graph::graph::NodeType::File);
-        let mut parent = path.parent();
-        while let Some(p) = parent {
-            let dir = p.display().to_string();
-            if dir != "." && !dir.is_empty() && dirs.insert(dir.clone()) {
-                let dname = p
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| dir.clone());
-                graph.add_node(p, dname, gitx_graph::graph::NodeType::Directory);
-            }
-            parent = p.parent();
-        }
-
-        // Heuristic imports: `use a::b`, `import x from 'y'`, `require('y')`,
-        // `from x import y`. Edges to resolvable repo-relative module paths.
-        let Ok(Some(bytes)) = repo.blob_at_path(head_commit.tree_id, &path) else {
-            continue;
-        };
-        let content = String::from_utf8_lossy(&bytes);
-        let ext = path
-            .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let imports: Vec<String> = match ext.as_str() {
-            "rs" => content
-                .lines()
-                .filter(|l| l.trim_start().starts_with("use "))
-                .map(|l| {
-                    l.trim()
-                        .trim_start_matches("use ")
-                        .split("::")
-                        .next()
-                        .unwrap_or("")
-                        .to_string()
-                })
-                .collect(),
-            "js" | "ts" | "jsx" | "tsx" | "mjs" | "cjs" => content
-                .lines()
-                .filter_map(|l| {
-                    let t = l.trim();
-                    if let Some(rest) = t.strip_prefix("import ")
-                        && rest.contains("from")
-                    {
-                        rest.split("from")
-                            .nth(1)
-                            .map(|s| s.trim().trim_matches(['\'', '"', ';']).to_string())
-                    } else {
-                        t.strip_prefix("require(")
-                            .map(|rest| rest.trim().trim_matches(['\'', '"', ')', ';']).to_string())
-                    }
-                })
-                .filter(|i| i.starts_with('.') || i.starts_with('/'))
-                .collect(),
-            "py" => content
-                .lines()
-                .filter_map(|l| {
-                    let t = l.trim();
-                    if let Some(rest) = t.strip_prefix("from ")
-                        && let Some((module, _)) = rest.split_once(" import")
-                    {
-                        Some(module.trim().to_string())
-                    } else if let Some(rest) = t.strip_prefix("import ")
-                        && !rest.starts_with('(')
-                    {
-                        Some(rest.split_whitespace().next().unwrap_or("").to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            "go" => content
-                .lines()
-                .filter_map(|l| {
-                    let t = l.trim();
-                    t.strip_prefix("import ")
-                        .map(|s| s.trim().trim_matches(['\'', '"']).to_string())
-                        .or_else(|| {
-                            t.strip_prefix('\t')
-                                .filter(|_| t.starts_with("\""))
-                                .map(|s| s.trim().trim_matches('"').to_string())
-                        })
-                })
-                .filter(|i| i.contains('/'))
-                .collect(),
-            _ => Vec::new(),
-        };
-        for imp in imports {
-            if imp.is_empty() {
-                continue;
-            }
-            // Resolve relative imports against the importing file's directory;
-            // absolute-ish module paths are kept as-is (unresolvable → skip).
-            let target = if imp.starts_with('.') {
-                let base = path.parent().unwrap_or_else(|| std::path::Path::new("/"));
-                let joined = base.join(&imp);
-                let norm = normalize(&joined.to_string_lossy());
-                if repo
-                    .list_blobs(head_commit.tree_id)
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|p| p.starts_with(&norm))
-                {
-                    norm
-                } else {
-                    continue;
-                }
-            } else {
-                continue; // external/unresolvable imports are out of scope
-            };
-            import_edges.push((path_str.clone(), target));
-        }
-    }
-
-    // Add import edges between existing file nodes only.
-    let mut edge_count = 0usize;
-    for (from, to) in &import_edges {
-        if let (Some(a), Some(b)) = (graph.get_node(from), graph.get_node(to)) {
-            graph.add_edge(a, b, gitx_graph::graph::EdgeType::Imports, 1);
-            edge_count += 1;
-        }
-    }
+    let graph = gitx_graph::graph::build_head_code_graph(&repo)?;
 
     let mut nodes: Vec<serde_json::Value> = graph
         .graph
@@ -1484,17 +1349,21 @@ pub fn graph(cli: &Cli) -> anyhow::Result<()> {
         (a["from"].as_str(), a["to"].as_str()).cmp(&(b["from"].as_str(), b["to"].as_str()))
     });
 
+    let import_count = edges.iter().filter(|e| e["type"] == "imports").count();
+    let call_count = edges.iter().filter(|e| e["type"] == "calls").count();
+
     if cli.json {
         return print_json(&json!({"nodes": nodes, "edges": edges}));
     }
 
-    println!("Graph (HEAD tree + heuristic imports — docs/21 Stage 6)");
+    println!("Graph (HEAD tree + heuristic imports/calls — docs/21 Stage 6)");
     println!(
-        "  {} nodes ({} files, {} directories), {} import edges",
+        "  {} nodes ({} files, {} directories), {} import edges, {} call edges",
         nodes.len(),
         nodes.iter().filter(|n| n["type"] == "file").count(),
         nodes.iter().filter(|n| n["type"] == "directory").count(),
-        edge_count
+        import_count,
+        call_count,
     );
     println!();
     println!("  directories:");
@@ -1502,33 +1371,19 @@ pub fn graph(cli: &Cli) -> anyhow::Result<()> {
         println!("    {}", n["path"].as_str().unwrap_or(""));
     }
     println!();
-    println!("  import edges (resolvable relative imports only):");
-    if edge_count == 0 {
+    println!("  edges (resolvable, heuristic):");
+    if import_count + call_count == 0 {
         println!("    (none — imports are external or unparsed by the heuristic)");
     }
     for e in edges.iter().take(60) {
         println!(
-            "    {} → {}",
+            "    [{}] {} → {}",
+            e["type"].as_str().unwrap_or(""),
             e["from"].as_str().unwrap_or(""),
             e["to"].as_str().unwrap_or("")
         );
     }
     Ok(())
-}
-
-/// Normalize a relative path string (remove `./` and resolve `..` segments).
-fn normalize(p: &str) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    for seg in p.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            s => parts.push(s.to_string()),
-        }
-    }
-    parts.join("/")
 }
 
 fn file_json(f: &FileAnalysis) -> serde_json::Value {
