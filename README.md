@@ -79,10 +79,6 @@ gitx-tui
 
 Use `j` and `k` to navigate through the dashboard tabs (Overview, Timeline, Commits, Hotspots, Architecture, etc.), and hit `Enter` to select.
 
-## Documentation
-
-For a deep dive into the underlying architecture, data models, and specifications, please see the [Documentation Index](docs/INDEX.md).
-
 ## License
 
 MIT
