@@ -105,28 +105,28 @@ Do not keep every commit diff in memory.
 
 ## 9. Benchmarks
 
-Maintain benchmark repositories:
+Benchmark repositories are generated deterministically in temp dirs by
+`crates/gitx-services/benches/operations.rs` (the git CLI is used only to
+*generate* fixtures; timed loops run through gix):
 
-- tiny
-- medium
-- large
-- merge-heavy
-- rename-heavy
-- long-history
-- binary-heavy
+- tiny baseline: 120 commits / 1 file (`services/*_120_commits`)
+- medium: 500 commits / 20 files (`search/search_fts_medium_repo`)
+- long-history: 400 commits / 1 file (`history/file_lineage_deep_history`)
+- merge-heavy: 400 commits with periodic two-parent merges
+  (`branches/branch_intelligence_all_local`)
+- rename-heavy: 400 commits with periodic file renames
 
-Benchmark:
-
-- initial index
-- refresh
-- search
-- hotspot calculation
-- branch analysis
-- file history
-- TUI data preparation
+Benchmarked operations: initial index scan, stats read, FTS search (small +
+medium repos), hotspot/regression analysis (`crates/gitx-analysis/benches`),
+file-history lineage, and branch analysis. TUI data preparation is covered by
+`scripts/verify-tui.sh`'s lazy-loading startup checks (see §7). Run everything
+with `scripts/bench.sh`; results append to `benches/RESULTS.md`.
 
 ## 10. Regression policy
 
 A significant performance regression must be investigated before release.
-
-Store benchmark results where possible.
+`benches/RESULTS.md` holds the recorded baseline (host + date per run, see
+`scripts/bench.sh`). Compare a new run's means against the stored baseline; a
+>10% mean regression on the same host warrants investigation before release.
+CI stays compile-only (`cargo bench --workspace --no-run`) so benches never
+slow down the pipeline — they are a release-gate measurement, not a CI check.
