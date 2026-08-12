@@ -1,83 +1,108 @@
 # GitX
 
-GitX is a **local-first, terminal-native Git repository intelligence and code archaeology CLI**. 
+> Local-first, terminal-native Git repository intelligence and code archaeology.
 
-It turns your Git repository's history, structure, changes, ownership, branches, dependencies, and recovery information into a fast, interactive, explainable terminal experience.
+[![CI](https://github.com/abuzarkhan1/gitx/actions/workflows/ci.yml/badge.svg)](https://github.com/abuzarkhan1/gitx/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/gitx-cli)](https://crates.io/crates/gitx-cli)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Overview
+GitX turns a Git repository's history, structure, changes, ownership, branches,
+dependencies, and recoverable work into a fast, interactive, explainable
+terminal experience — with **no network, no accounts, no AI**. Every score
+exposes the raw Git signals behind it.
 
-Unlike standard Git commands which just show you raw history, GitX acts as an intelligent layer on top of your local repository. By building a local, lightning-fast SQLite index of your codebase, GitX provides instant answers to complex code archaeology questions:
+![gitx dashboard](docs/assets/gitx-dashboard.png)
 
-- **Where are the maintenance hotspots?** (Which files change the most and contain the most bugs?)
-- **Who actually owns this module?** (Beyond just `git blame`, who has historically owned this code?)
-- **What is the repository health?** (Analyzes churn, risk, and test coverage regressions).
-- **How has the architecture evolved?** (Structural dependency graphing using tree-sitter).
-- **What did we lose?** (Advanced reflog and unreachable commit recovery).
-
-## Features
-
-- ⚡️ **Lightning Fast**: Built in Rust. Scans and indexes your repository into a local SQLite database for instant querying.
-- 📊 **Advanced Analytics**: Calculates Risk Scores, Change Frequencies, and Churn metrics using deterministic algorithms. 
-- 🖥️ **Interactive TUI**: Comes with a gorgeous Terminal User Interface (`gitx-tui`) to explore the repository graphically without leaving your terminal.
-- 🔍 **FTS5 Search**: Perform powerful full-text searches across commits, files, tags, and authors instantly.
-- 🧠 **Explainable Intelligence**: No AI black boxes. Every score or warning exposes the raw git signals behind it.
-- 🔧 **Machine Readable**: Every CLI command can output structured JSON for CI/CD pipeline integrations.
-
-## Installation
-
-GitX is split into two applications: the primary CLI (`gitx`) and the interactive dashboard (`gitx-tui`).
+## Quick start
 
 ```bash
-# Clone the repository
-git clone https://github.com/abuzarkhan1/gitx.git
-cd gitx
-
-# Install the CLI tool
-cargo install --path crates/gitx-cli
-
-# Install the TUI dashboard
-cargo install --path crates/gitx-tui
+# In any Git repository:
+gitx
 ```
 
-## Quick Start
+`gitx` opens the interactive dashboard: repository health, activity,
+hotspots, ownership, branches, architecture, dependencies, recovery — all
+explorable with the keyboard or mouse. Your history is indexed into a local
+SQLite cache on first use, so everything after that is sub-second.
 
-### Using the CLI
-
-To get started, simply navigate to any Git repository and build the local index:
+Prefer the command line? Every capability is a command:
 
 ```bash
-cd my-project/
-gitx scan
+gitx stats                  # repository statistics
+gitx hotspots               # files ranked by maintenance risk
+gitx health                 # composite health score, six sub-scores
+gitx ownership              # who owns what, and where it concentrates
+gitx lineage src/main.rs    # the full life of a file, renames included
+gitx blame src/main.rs      # line-level attribution
+gitx branches               # divergence, age, shared files, staleness
+gitx search "deadlock"      # FTS across commits, files, authors, tags
+gitx recovery               # reflog, unreachable commits, dangling objects
+gitx dependencies           # declared + lockfile-precise dependencies
+gitx symbols                # functions/classes extracted from HEAD
+gitx release diff v1.0 v1.1 # what shipped between releases
 ```
 
-Once the repository is indexed, you can run any of the powerful analytical commands:
+All analytical commands emit machine-readable output:
 
 ```bash
-# Get high-level repository stats
-gitx stats
-
-# Find the highest-risk files in the codebase
-gitx hotspots
-
-# See the line-level historical lineage of a file
-gitx lineage src/main.rs
-
-# Get a composite health score for the repository
-gitx health
-
-# Output analytics as JSON for a script
-gitx --json risk
+gitx --json hotspots
+gitx --csv contributors
 ```
 
-### Using the TUI
-
-If you prefer a visual dashboard, simply run the TUI in your terminal:
+## Install
 
 ```bash
-gitx-tui
+# crates.io (CLI only)
+cargo install gitx-cli --locked
+
+# cargo-dist installers (CLI + TUI) — one line, from the GitHub Releases page
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/abuzarkhan1/gitx/releases/latest/download/gitx-installer.sh | sh
+
+# Homebrew (when the tap is published)
+brew install abuzarkhan1/tap/gitx
 ```
 
-Use `j` and `k` to navigate through the dashboard tabs (Overview, Timeline, Commits, Hotspots, Architecture, etc.), and hit `Enter` to select.
+Then add shell completions:
+
+```bash
+gitx completions bash   # zsh / fish / powershell also supported
+```
+
+## What makes GitX different
+
+- **Explainable, not black-box.** `gitx risk src/main.rs` prints the formula,
+  the time window, and every input (change frequency, churn, bug-fix rate,
+  ownership concentration, complexity). No hidden scoring.
+- **Local and private.** Everything runs on your machine against your
+  repository. Nothing leaves it.
+- **Deterministic.** The same repository and configuration produce the same
+  results, bit for bit — safe for CI.
+- **Built for archaeology.** Rename-following lineage, copy-source tracking,
+  symbol history, and recovery of unreachable work are first-class features,
+  not afterthoughts.
+- **Fast at scale.** A persistent SQLite index means hot queries read
+  milliseconds, with phased lazy loading in the dashboard on large
+  repositories.
+
+## Documentation
+
+The full specification set lives in [`docs/`](docs/INDEX.md): product
+requirements, CLI and TUI specifications, the analysis engine, the database
+schema, the recovery model, and a docs ⇄ code audit matrix
+([`docs/26-IMPLEMENTATION-STATUS.md`](docs/26-IMPLEMENTATION-STATUS.md)).
+
+## Development
+
+```bash
+cargo build --workspace
+scripts/check.sh            # fmt + clippy -D warnings + tests
+scripts/verify-tui.sh       # headless PTY verification of the dashboard
+scripts/bench.sh            # criterion baselines → benches/RESULTS.md
+scripts/ansi-to-png.py      # regenerate docs/assets/gitx-dashboard.png from a capture
+```
+
+See [`docs/22-CONTRIBUTING.md`](docs/22-CONTRIBUTING.md) and
+[`docs/27-RELEASING.md`](docs/27-RELEASING.md).
 
 ## License
 
