@@ -43,6 +43,31 @@ All notable changes to GitX are documented here. Format follows
   Dependencies, Risk, Health, Recovery and live Search.
 - Shell completions (`gitx completions <shell>`).
 - TOML configuration (`gitx config show|init`).
+- Language-aware complexity: hotspot/risk scoring uses the symbol
+  extractor's function count (`symbols+loc`), with a labeled LOC fallback
+  for binary/unknown files.
+- `gitx symbols history <name>`: where and when a symbol was born, moved,
+  renamed, or deleted across commit lineage.
+- `gitx graph` call edges (heuristic `name(` scans) and a TUI Graph view
+  (`g` key) with per-directory file/import/call counts.
+- Advanced filters: `gitx timeline --committer/--merges/--no-merges` and
+  `gitx search --until/--path` (CLI + TUI).
+- Streamed `gitx diff A B` with `--stat` and `--path` modes, paged output
+  for wide diffs.
+- CSV export: `--csv` on the tabular commands (hotspots, risk, health,
+  branches, contributors, ownership, timeline) via a shared deterministic
+  writer.
+- TUI lazy loading: the Overview paints Phase A data immediately while
+  heavy panels (hotspots, branches, recovery, graph…) load in the
+  background with honest "Loading…" placeholders.
+- Benchmark breadth: medium/merge-heavy/rename-heavy/long-history
+  fixtures; file-lineage, branch-intelligence, and medium-repo FTS benches;
+  `scripts/bench.sh` recording baselines to `benches/RESULTS.md`.
+- Copy-source lineage: `Copied` changes in `gitx history --follow`/blame
+  are followed to their source file; merge-touched files carry a
+  `via_merge` marker.
+- Installation docs: `cargo-dist` installers and a homebrew tap
+  (docs/18 §9); `Cargo.lock` is committed and `--locked` builds verified.
 - Schema v3 corrective migration: FTS5 delete/update triggers now use plain
   `DELETE FROM <fts> WHERE rowid = ...` (the FTS5 `'delete'` special command
   is only valid for contentless/external-content tables).

@@ -517,6 +517,46 @@ produced a 20-point gap list; **every point is now implemented and verified**
 - docs/18 §9 Installation rewritten with real binary-download, source-build
   and shell-completion steps.
 
+## Seventh implementation pass (remaining-work plan closed)
+
+Executed the 13-task remaining-work plan (docs/superpowers/plans/
+2026-08-12-remaining-work.md) in five parallel workstreams, each task
+committed green; **44/44 PTY checks** (39 + 3 lazy-loading), 37 test
+binaries green, clippy `-D warnings` clean, `cargo fmt` clean,
+`scripts/check.sh` green, `--locked` builds verified.
+
+- **Analysis depth (Tasks 1–2)** — hotspots/risk now use a real complexity
+  signal: the heuristic `function_count` extractor feeds the score and the
+  evidence line labels its source (`symbols+loc (N fns)` vs `loc`).
+  `gitx symbols history <name>` walks commit lineage to show where and
+  when a symbol was born, moved, renamed, or deleted (`gitx-history`
+  lineage engine, `ObjectId` events).
+- **CLI breadth (Tasks 4–6)** — `gitx timeline --committer/--merges/
+  --no-merges`; `gitx search --until/--path` (both the `gitx-search` and
+  `gitx-services` layers, CLI + TUI); a new streamed `gitx diff A B
+  [--stat] [--path]` with paged output; `--csv` on all tabular commands
+  (hotspots, risk, health, branches, contributors, ownership, timeline)
+  via a shared `gitx-core::csv` writer with deterministic quoting.
+- **Graph depth (Task 3)** — `CodeGraph` gains heuristic `Calls` edges
+  from symbol extraction; a shared `build_head_code_graph` builder serves
+  both the CLI (`gitx graph` — 525 call edges on this repo) and a new TUI
+  **Graph** view (`g` key) listing per-directory file/import/call counts;
+  the dead `gitx_graph::dependency` module is gone.
+- **TUI/perf (Tasks 7–8)** — the loader is phased: Phase A (Overview
+  essentials) paints immediately, Phase B (heavy panels) fills in while
+  the user navigates, with honest "Loading…" placeholders replacing the
+  misleading empty state. Benches now cover medium/merge-heavy/rename-
+  heavy/long-history fixtures (file lineage, branch intelligence, medium
+  FTS) with `scripts/bench.sh` recording baselines to `benches/RESULTS.md`.
+- **Lineage (Task 11)** — `Copied` changes are followed to their source
+  file in `gitx history --follow`/blame, and merge-touched files are
+  marked `via_merge` instead of falling through the lineage walk.
+- **Docs & hygiene (Tasks 9–10, 12)** — ADR-011 recorded (reject
+  tree-sitter; heuristic symbols win on zero-dependency determinism) and
+  the `DummyParser` stub removed; docs/18 §9 documents `cargo-dist`
+  installers + homebrew tap; `.freebuff/` data and scratch files are
+  untracked and `Cargo.lock` is committed (`--locked` verified).
+
 ## Remaining gaps — complete line-by-line audit (docs ⇄ code)
 
 Re-audited every doc word-by-word against the workspace. Items below are
@@ -675,24 +715,34 @@ architecture before/after).
 ### Later / V1–V2 gaps (docs mark these as future work — listed for
 completeness, not defects)
 
-53. **docs/10 §10 — Architecture milestones and dependency-direction
-    changes** are not detected (only added/removed/modified + new modules).
-54. **docs/10 §11 — Dependency depth:** usage (files referencing a dep) and
-    change-churn are live via `gitx dependencies usage`; direct/indirect
-    classification, cargo features, and pnpm catalogs remain unresolved.
-55. **docs/11 §8 — Ranking tiers.** bm25 relevance only; the exact >
-    path/name > recent > textual priority tiers are not implemented
-    (results are still deterministic).
-56. **docs/21 Stage 6, docs/02 V1/V2 — Language symbols, Tree-sitter,
-    structural graphs.** `gitx-graph::treesitter` is a `DummyParser` stub
-    (ADR-011 Proposed); `CodeGraph` exists but no command/TUI consumes it;
-    symbol history and language-aware analysis are unimplemented.
-57. **docs/02 V2 — Advanced copy/rename lineage, richer export formats.**
-58. **docs/18 §9 — Installation docs** cover binary download, source build,
-    and completions; package-manager installation is still "later".
-59. **docs/13 §4/§8 — Large-diff memory streaming** (incremental diff
-    materialization and bounded output for `gitx diff` on huge commits) and
-    the sub-second-startup target for very large repositories.
+Items marked **[closed]** were completed in the sixth pass (search tiers,
+symbols, milestones, dependency depth) or the seventh pass below.
+
+53. **[closed]** docs/10 §10 — Architecture milestones and
+    dependency-direction changes: `gitx architecture milestones` plus
+    direction flips in `architecture diff` (sixth pass).
+54. **[closed]** docs/10 §11 — Dependency depth: direct/indirect
+    classification, cargo `[features]`, and pnpm `catalogs:` (sixth pass);
+    usage/churn via `gitx dependencies usage`.
+55. **[closed]** docs/11 §8 — Ranking tiers: deterministic tiered ranking
+    (exact → path/name → recent → FTS score) shipped in the sixth pass.
+56. **docs/21 Stage 6, docs/02 V1/V2 — Tree-sitter.** Heuristic symbol
+    extraction, language-aware complexity (`symbols+loc` hotspot signal),
+    symbol history (`gitx symbols history`), and the structural graph
+    (`gitx graph` with call edges + TUI Graph view) all shipped. Only
+    native Tree-sitter parsing remains, deliberately deferred: ADR-011 is
+    now Decided (reject), and the unconsumed `DummyParser` stub was removed.
+57. **[closed]** docs/02 V2 — Advanced copy/rename lineage (copy-source
+    tracking + merge-touch markers) and CSV export (`--csv` on tabular
+    commands) shipped in the sixth/seventh passes.
+58. **[closed]** docs/18 §9 — Installation docs now cover `cargo-dist`
+    installers and a homebrew tap alongside binary download, source build,
+    and completions.
+59. **[closed]** docs/13 §4/§8 — `gitx diff` streams bounded output with a
+    `--stat` mode; the TUI paints Phase A data before heavy panels finish
+    (lazy loading); medium/merge/rename/long-history benchmarks plus a
+    recorded baseline (`benches/RESULTS.md`, `scripts/bench.sh`) measure
+    the sub-second-startup budget on a per-release basis.
 
 ## Deliberate non-goals preserved
 
