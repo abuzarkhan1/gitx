@@ -13,14 +13,11 @@ use anyhow::Context;
 
 pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
     tracing::debug!(repo = ?cli.repo, json = cli.json, "gitx dispatch");
-    // No subcommand → start the TUI (docs/07 §1). The TUI crate is a separate
-    // binary today; surface a clear message instead of a silent no-op.
+    // No subcommand → the dashboard (docs/01 UC-01, docs/16 §7): launch the
+    // TUI when stdout is a terminal, otherwise print a repository snapshot
+    // so `gitx` is useful in pipes and CI too.
     if cli.command.is_none() {
-        eprintln!(
-            "gitx: the interactive TUI is a separate binary (gitx-tui); run `cargo run -p gitx-tui`"
-        );
-        eprintln!("gitx: use `gitx --help` for the available commands");
-        return Ok(());
+        return run_dashboard_or_tui(&cli);
     }
 
     match cli.command.take().expect("checked above") {
@@ -131,7 +128,25 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
         Commands::Release { tag, action } => recovery::release(&cli, tag, action),
         Commands::Config { action } => config::config_command(&cli, action),
         Commands::Completions { shell } => completions::completions(shell),
+        Commands::Tui => run_dashboard_or_tui(&cli),
     }
+}
+
+/// `gitx` with no subcommand (docs/01 UC-01, docs/16 §7): on a terminal,
+/// launch the interactive dashboard in-process; on a pipe/CI, print a
+/// compact repository snapshot so the command is never a silent no-op.
+pub fn run_dashboard_or_tui(cli: &Cli) -> anyhow::Result<()> {
+    use std::io::IsTerminal;
+    if std::io::stdout().is_terminal() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+        let vim_keys = crate::commands::config::load_config(cli)
+            .map(|c| c.ui.vim_keys)
+            .unwrap_or(true);
+        return runtime.block_on(gitx_tui::run(vim_keys));
+    }
+    repo::snapshot(cli)
 }
 
 /// Open the repository from `--repo` or discover it from the current directory.

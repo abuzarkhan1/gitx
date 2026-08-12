@@ -89,4 +89,7 @@ cd repository
 gitx
 ```
 
-and immediately use the tool.
+and immediately use the tool: the dashboard opens in a terminal, and on a
+pipe/CI `gitx` prints a repository snapshot. The index builds itself on
+first use (`[index] auto_refresh`, docs/09) so subsequent reads are
+sub-second.

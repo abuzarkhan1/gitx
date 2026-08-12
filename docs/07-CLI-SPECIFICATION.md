@@ -4,9 +4,13 @@
 
 ```bash
 gitx
+gitx tui
 ```
 
-Opening without a subcommand starts the interactive TUI.
+Opening without a subcommand starts the interactive TUI (docs/01 UC-01,
+docs/16 §7); `gitx tui` launches it explicitly. When stdout is not a
+terminal (pipes, CI), `gitx` prints a compact repository snapshot instead
+of launching an interactive session.
 
 ## 2. Global options
 

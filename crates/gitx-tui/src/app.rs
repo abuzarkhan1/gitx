@@ -141,6 +141,10 @@ pub struct App {
     /// True while an FTS search is running on a worker thread (docs/08: the
     /// UI never freezes on large repositories).
     pub search_pending: bool,
+    /// Honor vim-style j/k/h/l keys (docs/16 `[ui] vim_keys`). Arrows always
+    /// work; when false, j/k/h/l are ignored so non-vim users never trigger
+    /// accidental navigation.
+    pub vim_keys: bool,
     /// Terminal width from the last render (docs/08 §5 responsive layout):
     /// lets the mouse handler compute the sidebar width for click targets.
     pub width: u16,
@@ -164,18 +168,20 @@ pub struct App {
 
 impl Default for App {
     fn default() -> Self {
-        Self::new()
+        Self::new(true)
     }
 }
 
 impl App {
     /// Start with no data: the repository load runs on a worker thread and
     /// lands via [`App::apply_data`] once ready (docs/08 loading progress).
-    pub fn new() -> Self {
-        Self::spawn_load()
+    /// `vim_keys` enables j/k/h/l navigation (docs/16 `[ui] vim_keys`);
+    /// arrows always work.
+    pub fn new(vim_keys: bool) -> Self {
+        Self::spawn_load(vim_keys)
     }
 
-    fn spawn_load() -> Self {
+    fn spawn_load(vim_keys: bool) -> Self {
         let (tx, rx) = std::sync::mpsc::channel::<LoadMsg>();
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_cancel = cancel.clone();
@@ -183,6 +189,7 @@ impl App {
             load_repo_stats(&tx, &worker_cancel);
         });
         Self {
+            vim_keys,
             current_view: View::Overview,
             nav_index: 0,
             running: true,

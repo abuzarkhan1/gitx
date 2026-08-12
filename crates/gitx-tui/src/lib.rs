@@ -11,9 +11,9 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind};
 use std::time::Duration;
 
-pub async fn run() -> Result<()> {
+pub async fn run(vim_keys: bool) -> Result<()> {
     let mut terminal = terminal::setup_terminal()?;
-    let mut app = App::new();
+    let mut app = App::new(vim_keys);
     let mut events = EventHandler::new(Duration::from_millis(250));
     // When true, keystrokes edit the search query instead of navigating.
     let mut search_mode = false;
@@ -134,7 +134,7 @@ fn handle_key(app: &mut App, search_mode: &mut bool, key: KeyEvent) {
                 app.scroll = 0;
             }
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down | KeyCode::Char('j') if app.vim_keys || key.code == KeyCode::Down => {
             if app.in_content {
                 if app.current_view == View::Detail {
                     app.detail_scroll = app.detail_scroll.saturating_add(1);
@@ -147,7 +147,7 @@ fn handle_key(app: &mut App, search_mode: &mut bool, key: KeyEvent) {
                 app.next_nav();
             }
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up | KeyCode::Char('k') if app.vim_keys || key.code == KeyCode::Up => {
             if app.in_content {
                 if app.current_view == View::Detail {
                     app.detail_scroll = app.detail_scroll.saturating_sub(1);
@@ -158,7 +158,9 @@ fn handle_key(app: &mut App, search_mode: &mut bool, key: KeyEvent) {
                 app.prev_nav();
             }
         }
-        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+        KeyCode::Enter | KeyCode::Right | KeyCode::Char('l')
+            if app.vim_keys || key.code == KeyCode::Enter || key.code == KeyCode::Right =>
+        {
             if app.current_view == View::Detail {
                 // In detail, Enter is a no-op (Esc/← closes).
             } else if app.in_content {
@@ -168,7 +170,7 @@ fn handle_key(app: &mut App, search_mode: &mut bool, key: KeyEvent) {
                 app.select_nav();
             }
         }
-        KeyCode::Left | KeyCode::Char('h') => {
+        KeyCode::Left | KeyCode::Char('h') if app.vim_keys || key.code == KeyCode::Left => {
             if app.current_view == View::Detail {
                 app.close_detail();
             } else if app.in_content {

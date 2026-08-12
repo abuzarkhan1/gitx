@@ -20,6 +20,50 @@ fn bin() -> std::path::PathBuf {
 }
 
 #[test]
+fn gitx_with_no_args_on_a_pipe_prints_a_snapshot() {
+    let Some(repo) = FixtureRepo::new("product-noarg") else {
+        return;
+    };
+    repo.write("src/lib.rs", "pub fn hello() {}\n");
+    repo.commit("feat: initial");
+    repo.write("src/lib.rs", "pub fn hello() { println!(\"hi\"); }\n");
+    repo.commit("feat: print hi");
+
+    let out = Command::new(bin())
+        .arg("--repo")
+        .arg(repo.path())
+        .output()
+        .expect("gitx runs");
+    assert!(
+        out.status.success(),
+        "no-arg must exit 0, got {:?}",
+        out.status
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("GitX") && text.contains("commits"),
+        "piped no-arg must print a snapshot, got: {text}"
+    );
+    assert!(
+        text.contains("2"),
+        "fixture has 2 commits, snapshot should mention them: {text}"
+    );
+}
+
+#[test]
+fn gitx_tui_subcommand_exists_in_help() {
+    let out = Command::new(bin())
+        .arg("--help")
+        .output()
+        .expect("gitx --help runs");
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("tui") && text.contains("interactive terminal"),
+        "help must document `gitx tui`, got: {text}"
+    );
+}
+
+#[test]
 fn health_output_labels_bands_health_style() {
     let Some(repo) = FixtureRepo::new("product-healthbands") else {
         return;

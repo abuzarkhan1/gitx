@@ -98,6 +98,28 @@ else
 fi
 tmux kill-session -t gitxlazy 2>/dev/null
 
+# ── `gitx` (no args) launches the dashboard (docs/01 UC-01, docs/16 §7) ──
+# The CLI must open the TUI Overview in a terminal instead of printing a
+# "separate binary" hint.
+tmux kill-session -t gitxcli 2>/dev/null
+tmux new-session -d -s gitxcli -x 140 -y 44
+tmux send-keys -t gitxcli "cd $FIX && TERM=xterm-256color $ROOT/target/debug/gitx" Enter
+for _ in $(seq 1 20); do
+  tmux capture-pane -t gitxcli -p | grep -q "Overview" && break
+  sleep 0.5
+done
+tmux capture-pane -t gitxcli -p > "$OUT/00_cli_noarg.txt"
+if grep -q "Overview" "$OUT/00_cli_noarg.txt"; then
+  echo "  PASS  gitx (no args) opens the TUI Overview"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  gitx (no args) opens the TUI Overview"
+  FAIL=$((FAIL + 1))
+fi
+tmux send-keys -t gitxcli q
+sleep 0.4
+tmux kill-session -t gitxcli 2>/dev/null
+
 tmux kill-session -t "$SESS" 2>/dev/null
 tmux new-session -d -s "$SESS" -x 140 -y 44
 tmux send-keys -t "$SESS" "cd $FIX && TERM=xterm-256color $BIN" Enter

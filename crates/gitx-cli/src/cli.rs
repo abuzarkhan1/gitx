@@ -264,6 +264,8 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+    /// Launch the interactive terminal dashboard.
+    Tui,
 }
 
 #[derive(Subcommand, Debug, Clone)]

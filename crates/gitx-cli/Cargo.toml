@@ -23,6 +23,8 @@ gitx-index = { version = "0.1.0", path = "../gitx-index" }
 gitx-search = { version = "0.1.0", path = "../gitx-search" }
 gitx-services = { version = "0.1.0", path = "../gitx-services" }
 gitx-storage = { version = "0.1.0", path = "../gitx-storage" }
+gitx-tui = { version = "0.1.0", path = "../gitx-tui" }
+tokio = { version = "1.0", features = ["rt-multi-thread", "time"] }
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive"] }
 clap_complete = "4.5"

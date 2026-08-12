@@ -37,6 +37,56 @@ pub fn info(cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Compact one-screen repository snapshot for `gitx` on a non-terminal
+/// (pipes, CI) — docs/16 §7: `gitx` must do something useful everywhere.
+pub fn snapshot(cli: &Cli) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let service = RepositoryService::new(&repo);
+    let data = service.info();
+    let state = service.state();
+    let stats = match service.stats_from_index().ok().flatten() {
+        Some(s) => Some(gitx_analysis::RepoStats {
+            commits: s.commits,
+            contributors: s.contributors as usize,
+            files: s.files as usize,
+            branches: s.branches as usize,
+            tags: s.tags as usize,
+            age_days: s.age_days as i64,
+            first_commit: s.first_commit,
+            last_commit: s.latest_commit,
+            head_oid: None,
+            head_message: None,
+            languages: s
+                .languages
+                .into_iter()
+                .map(|(ext, count)| (ext, count as usize))
+                .collect(),
+        }),
+        None => gitx_analysis::repository_stats(&repo).ok(),
+    };
+
+    println!("GitX — repository snapshot");
+    println!(
+        "  repository : {}",
+        data["work_dir"].as_str().unwrap_or("<bare>")
+    );
+    println!("  state      : {}", state.git);
+    println!("  index      : {}", index_state_label(state.index));
+    if let Some(s) = stats {
+        println!("  commits    : {}", s.commits);
+        println!("  contributors: {}", s.contributors);
+        println!("  files      : {}", s.files);
+        println!("  branches   : {}", s.branches);
+        println!("  tags       : {}", s.tags);
+    } else {
+        println!("  commits    : (none yet)");
+    }
+    println!();
+    println!("  This is the non-interactive summary. Run `gitx` in a terminal for the");
+    println!("  dashboard, or `gitx --help` for every command.");
+    Ok(())
+}
+
 fn index_state_label(state: gitx_services::IndexState) -> String {
     use gitx_services::IndexState;
     match state {
