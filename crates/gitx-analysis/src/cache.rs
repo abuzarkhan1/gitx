@@ -294,6 +294,11 @@ pub fn load(conn: &Connection) -> anyhow::Result<Option<RepoAnalysis>> {
                     _ => "LOW",
                 },
                 risk,
+                // Index rows carry the score computed at scan time; the
+                // per-file function breakdown is not persisted (docs/10 §2:
+                // label the source rather than pretend it is live).
+                fn_count: 0,
+                complexity_source: "index",
             });
         }
     }

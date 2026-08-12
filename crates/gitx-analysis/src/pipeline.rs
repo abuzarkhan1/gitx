@@ -33,6 +33,13 @@ pub struct FileAnalysis {
     pub classification: &'static str,
     /// Composite risk score (evidence-backed, see docs/10).
     pub risk: f64,
+    /// Function/method count from the heuristic extractor (docs/10 §2);
+    /// 0 when the file's language has no extractor.
+    pub fn_count: u32,
+    /// `"symbols+loc"` when the extractor ran, `"loc"` otherwise, and
+    /// `"index"` for rows read back from the persisted index (docs/10 §2:
+    /// never silently zero a missing input — label the fallback).
+    pub complexity_source: &'static str,
 }
 
 /// Bounded worker pool for the analysis walk (docs/13 §6): CPU-heavy,
@@ -244,32 +251,41 @@ pub fn analyze_repository_with(
     let current_paths = repo.list_blobs(head_commit.tree_id)?;
     let current_set: std::collections::HashSet<PathBuf> = current_paths.iter().cloned().collect();
 
-    // 5. Line counts for every analyzed file (parallel blob reads, docs/13 §6).
+    // 5. Complexity signals for every analyzed file (parallel blob reads +
+    //    heuristic symbol extraction, docs/13 §6, docs/10 §2): line count and
+    //    function count (None when the language has no extractor).
     let paths: Vec<PathBuf> = accs.keys().cloned().collect();
     let chunk = paths.len().div_ceil(workers).max(1);
-    let locs: HashMap<PathBuf, u32> = analysis_pool().install(|| {
+    let signals: HashMap<PathBuf, (u32, Option<u32>)> = analysis_pool().install(|| {
         paths
             .par_chunks(chunk)
             .map(|chunk| {
                 let local = Repository::open(&git_dir)?;
                 let mut out = Vec::with_capacity(chunk.len());
                 for path in chunk {
-                    let loc = local
-                        .blob_at_path(head_commit.tree_id, path)
-                        .ok()
-                        .flatten()
-                        .map(|b| split_lines(&b).len() as u32)
+                    let blob = local.blob_at_path(head_commit.tree_id, path).ok().flatten();
+                    let loc = blob
+                        .as_deref()
+                        .map(|b| split_lines(b).len() as u32)
                         .unwrap_or(0);
-                    out.push((path.clone(), loc));
+                    let lang = crate::symbols::lang_of(path);
+                    let fn_count = match (&blob, lang) {
+                        (Some(b), Some(lang)) => {
+                            let text = String::from_utf8_lossy(b);
+                            Some(crate::symbols::function_count(&text, lang))
+                        }
+                        _ => None,
+                    };
+                    out.push((path.clone(), (loc, fn_count)));
                 }
                 Ok(out)
             })
-            .collect::<anyhow::Result<Vec<Vec<(PathBuf, u32)>>>>()
+            .collect::<anyhow::Result<Vec<Vec<(PathBuf, (u32, Option<u32>))>>>>()
             .map(|chunks| {
                 chunks
                     .into_iter()
                     .flatten()
-                    .collect::<HashMap<PathBuf, u32>>()
+                    .collect::<HashMap<PathBuf, (u32, Option<u32>)>>()
             })
     })?;
 
@@ -278,20 +294,25 @@ pub fn analyze_repository_with(
     let max_frequency = accs.values().map(|a| a.change_frequency).max().unwrap_or(0);
     let max_churn = accs.values().map(|a| a.recent_churn).max().unwrap_or(0);
     let max_bugs = accs.values().map(|a| a.bug_fix_count).max().unwrap_or(0);
-    let max_complexity = locs.values().copied().max().unwrap_or(0);
+    let max_complexity = signals
+        .values()
+        .map(|(loc, fns)| complexity_raw(*loc, fns.unwrap_or(0)))
+        .max()
+        .unwrap_or(0);
 
     let mut files = Vec::with_capacity(n);
     let mut recently_added = 0usize;
 
     for (path, acc) in &accs {
-        // Current line count of the file (complexity proxy, docs/10 §2),
-        // read in parallel during step 5.
-        let loc = locs.get(path).copied().unwrap_or(0);
-
+        // Current complexity signal of the file (docs/10 §2): LOC plus a
+        // per-function weight when the language has an extractor; the source
+        // is labeled so a missing extractor never silently zeroes the score.
+        let (loc, fn_count) = signals.get(path).copied().unwrap_or((0, None));
+        let raw_complexity = complexity_raw(loc, fn_count.unwrap_or(0));
+        let n_complexity = scale_u64(raw_complexity, max_complexity);
         let n_frequency = scale(acc.change_frequency, max_frequency);
         let n_churn = scale(acc.recent_churn as u32, max_churn as u32);
         let n_bugs = scale(acc.bug_fix_count, max_bugs);
-        let n_complexity = scale(loc, max_complexity);
 
         let ownership = ownership_concentration(&acc.authors);
         let hotspot = calculate_hotspot_score_with(
@@ -329,6 +350,12 @@ pub fn analyze_repository_with(
             hotspot: hotspot.value,
             classification: hotspot.classification,
             risk,
+            fn_count: fn_count.unwrap_or(0),
+            complexity_source: if fn_count.is_some() {
+                "symbols+loc"
+            } else {
+                "loc"
+            },
         });
 
         if let Some(first) = first
@@ -466,6 +493,22 @@ fn scale(value: u32, max: u32) -> f64 {
     }
 }
 
+/// Docs/10 §2 complexity signal: LOC plus a per-function weight (one
+/// function ≈ 30 lines). Deterministic; LOC alone remains the fallback
+/// for languages without an extractor.
+fn complexity_raw(loc: u32, fn_count: u32) -> u64 {
+    loc as u64 + 30 * fn_count as u64
+}
+
+/// Like [`scale`] but for the wider complexity range (u64).
+fn scale_u64(value: u64, max: u64) -> f64 {
+    if max == 0 {
+        0.0
+    } else {
+        value as f64 / max as f64 * 100.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,5 +533,21 @@ mod tests {
         assert_eq!(scale(5, 10), 50.0);
         assert_eq!(scale(10, 10), 100.0);
         assert_eq!(scale(42, 0), 0.0);
+    }
+
+    #[test]
+    fn complexity_raw_weights_functions_over_lines() {
+        // Docs/10 §2: a function is treated as roughly 30 lines.
+        assert_eq!(complexity_raw(100, 0), 100);
+        assert_eq!(complexity_raw(100, 3), 190);
+        assert_eq!(complexity_raw(0, 0), 0);
+    }
+
+    #[test]
+    fn scale_u64_normalizes_by_max() {
+        assert_eq!(scale_u64(0, 10), 0.0);
+        assert_eq!(scale_u64(10, 10), 100.0);
+        assert_eq!(scale_u64(5, 10), 50.0);
+        assert_eq!(scale_u64(7, 0), 0.0); // empty corpus -> 0, never NaN
     }
 }

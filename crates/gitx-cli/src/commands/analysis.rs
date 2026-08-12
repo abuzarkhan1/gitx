@@ -288,6 +288,11 @@ pub fn hotspots(cli: &Cli, limit: usize, path: Option<&str>) -> anyhow::Result<(
 
     println!("Hotspots (change/maintenance risk, 0–100)");
     for f in &files {
+        let cx = if f.fn_count > 0 {
+            format!("{} ({} fns)", f.complexity_source, f.fn_count)
+        } else {
+            f.complexity_source.to_string()
+        };
         println!(
             "  {:>5.1}  {:<8}  {}",
             f.hotspot,
@@ -295,7 +300,7 @@ pub fn hotspots(cli: &Cli, limit: usize, path: Option<&str>) -> anyhow::Result<(
             f.path.display()
         );
         println!(
-            "         changes {} | churn 30d {} | fixes {} | contributors {} | ownership {:.0}% | LOC {}",
+            "         changes {} | churn 30d {} | fixes {} | contributors {} | ownership {:.0}% | LOC {} | complexity {}",
             f.metrics.change_frequency,
             f.metrics.lines_added + f.metrics.lines_deleted,
             f.metrics.bug_fix_count,
@@ -304,6 +309,7 @@ pub fn hotspots(cli: &Cli, limit: usize, path: Option<&str>) -> anyhow::Result<(
             f.metrics
                 .lines_added
                 .saturating_sub(f.metrics.lines_deleted),
+            cx,
         );
     }
     Ok(())
@@ -344,6 +350,14 @@ pub fn risk(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
         println!("   bug-fix commits      {}", f.metrics.bug_fix_count);
         println!("   contributors         {}", f.metrics.unique_contributors);
         println!("   ownership conc.      {:.0}%", f.ownership_concentration);
+        if f.fn_count > 0 {
+            println!(
+                "   complexity           {} ({} functions)",
+                f.complexity_source, f.fn_count
+            );
+        } else {
+            println!("   complexity           {}", f.complexity_source);
+        }
         println!(
             "   formula              risk = (hotspot + ownership + churn30d + complexity) / 4"
         );
@@ -1319,5 +1333,7 @@ fn file_json(f: &FileAnalysis) -> serde_json::Value {
         "hotspot_score": f.hotspot,
         "classification": f.classification,
         "risk_score": f.risk,
+        "complexity_source": f.complexity_source,
+        "function_count": f.fn_count,
     })
 }

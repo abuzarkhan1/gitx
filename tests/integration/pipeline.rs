@@ -91,3 +91,38 @@ fn parallel_analysis_is_deterministic() {
         second.health.architecture_stability_score
     );
 }
+
+#[test]
+fn complexity_source_is_labeled_per_language() {
+    let Some(repo) = FixtureRepo::new("pipeline-complexity") else {
+        eprintln!("skipping: git CLI unavailable");
+        return;
+    };
+    repo.write("src/lib.rs", "pub fn a() {}\nfn b() {}\n");
+    repo.commit("feat: rust file with functions");
+    repo.write("data.txt", "plain text, no language\n");
+    repo.commit("docs: plain file");
+
+    let gix = Repository::discover(repo.path()).expect("open fixture");
+    let analysis = analyze_repository(&gix).expect("analysis");
+
+    let rust = analysis
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("lib.rs"))
+        .expect("rust file analyzed");
+    assert_eq!(rust.complexity_source, "symbols+loc");
+    assert!(
+        rust.fn_count >= 2,
+        "two functions extracted, got {}",
+        rust.fn_count
+    );
+
+    let plain = analysis
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("data.txt"))
+        .expect("plain file analyzed");
+    assert_eq!(plain.complexity_source, "loc");
+    assert_eq!(plain.fn_count, 0);
+}

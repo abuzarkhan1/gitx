@@ -20,8 +20,10 @@ pub struct Symbol {
     pub line: u32,
 }
 
-/// Supported source extensions (lowercase, no dot).
-fn lang_of(path: &Path) -> Option<&'static str> {
+/// Language for a path's extension (lowercase, no dot), or `None` for
+/// unsupported languages. Public so the pipeline and CLI can label
+/// complexity sources (docs/10 §2: never silently zero a missing input).
+pub fn lang_of(path: &Path) -> Option<&'static str> {
     let ext = path.extension()?.to_string_lossy().to_lowercase();
     match ext.as_str() {
         "rs" => Some("rust"),
@@ -79,6 +81,16 @@ pub fn extract_symbols(content: &str, lang: &str) -> Vec<Symbol> {
         }
     }
     out
+}
+
+/// Heuristic function/method count for `content` (docs/10 §2 complexity
+/// signal). Returns `0` for languages without an extractor; callers keep
+/// LOC as the always-available fallback and label the source.
+pub fn function_count(content: &str, lang: &str) -> u32 {
+    extract_symbols(content, lang)
+        .into_iter()
+        .filter(|s| matches!(s.kind.as_str(), "Function" | "Method"))
+        .count() as u32
 }
 
 fn is_comment(line: &str, lang: &str) -> bool {
@@ -405,5 +417,17 @@ const MAX: usize = 10;
         assert!(names.contains(&"Vec2"));
         assert!(!names.contains(&"fake"));
         assert!(!names.contains(&"x"));
+    }
+
+    #[test]
+    fn function_count_counts_only_functions_and_methods() {
+        let src = "pub struct S;\nimpl S {\n    pub fn method(&self) {}\n}\nfn helper() {}\nconst C: u32 = 1;\n";
+        assert_eq!(function_count(src, "rust"), 2);
+        assert_eq!(function_count(src, "python"), 0); // wrong lang -> nothing
+    }
+
+    #[test]
+    fn function_count_zero_for_unsupported_language() {
+        assert_eq!(function_count("def f(): pass", "plaintext"), 0);
     }
 }
