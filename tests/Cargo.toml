@@ -53,3 +53,7 @@ path = "integration/edge_cases.rs"
 [[test]]
 name = "services"
 path = "integration/services.rs"
+
+[[test]]
+name = "symbol_history"
+path = "integration/symbol_history.rs"

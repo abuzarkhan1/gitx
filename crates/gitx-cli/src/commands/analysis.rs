@@ -1,6 +1,6 @@
 use crate::cli::{Cli, DependenciesAction};
 use crate::commands::config::{load_config, load_config_for};
-use crate::commands::{format_ts, open_repo, print_json};
+use crate::commands::{format_ts, open_repo, print_json, short_oid};
 use gitx_analysis::{FileAnalysis, HotspotWeights, analyze_repository_with};
 use serde_json::json;
 use std::collections::HashMap;
@@ -1096,6 +1096,64 @@ pub fn symbols(cli: &Cli, path: Option<&str>) -> anyhow::Result<()> {
         }
         if syms.len() > 60 {
             println!("    ... {} more", syms.len() - 60);
+        }
+    }
+    Ok(())
+}
+
+/// Life of a symbol (docs/21 Stage 6): when it was added, moved, or removed
+/// along the mainline, computed from the lineage engine (deterministic,
+/// read-only). Evidence-first human output (docs/25).
+pub fn symbol_history(cli: &Cli, name: &str, path: Option<&str>) -> anyhow::Result<()> {
+    let repo = open_repo(cli)?;
+    let events =
+        gitx_analysis::symbol_history::symbol_history(&repo, name, path.map(std::path::Path::new))?;
+
+    if cli.json {
+        return print_json(&json!({
+            "symbol": name,
+            "events": events.iter().map(|e| json!({
+                "commit": e.commit_id.to_string(),
+                "file": e.file.display().to_string(),
+                "time": e.time,
+                "action": match &e.action {
+                    gitx_analysis::symbol_history::SymbolAction::Added { line } =>
+                        format!("added:{line}"),
+                    gitx_analysis::symbol_history::SymbolAction::Moved { from_line, to_line } =>
+                        format!("moved:{from_line}->{to_line}"),
+                    gitx_analysis::symbol_history::SymbolAction::Removed { line } =>
+                        format!("removed:{line}"),
+                },
+            })).collect::<Vec<_>>(),
+        }));
+    }
+
+    if events.is_empty() {
+        println!("No history for symbol `{name}` in HEAD files.");
+        return Ok(());
+    }
+    println!("Symbol history: `{name}` (mainline, newest first — docs/21 Stage 6)");
+    for e in events {
+        let when = format_ts(e.time);
+        match &e.action {
+            gitx_analysis::symbol_history::SymbolAction::Added { line } => println!(
+                "  added   {} {}  {line}  ({})",
+                short_oid(&e.commit_id),
+                e.file.display(),
+                when,
+            ),
+            gitx_analysis::symbol_history::SymbolAction::Moved { from_line, to_line } => println!(
+                "  moved   {} {}  :{from_line} -> :{to_line}  ({})",
+                short_oid(&e.commit_id),
+                e.file.display(),
+                when,
+            ),
+            gitx_analysis::symbol_history::SymbolAction::Removed { line } => println!(
+                "  removed {} {}  :{line}  ({})",
+                short_oid(&e.commit_id),
+                e.file.display(),
+                when,
+            ),
         }
     }
     Ok(())

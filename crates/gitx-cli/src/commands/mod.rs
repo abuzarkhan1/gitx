@@ -73,7 +73,12 @@ pub fn dispatch(mut cli: Cli) -> anyhow::Result<()> {
         Commands::Risk { path } => analysis::risk(&cli, path.as_deref()),
         Commands::Health => analysis::health(&cli),
         Commands::Regressions { max } => analysis::regressions(&cli, max),
-        Commands::Symbols { path } => analysis::symbols(&cli, path.as_deref()),
+        Commands::Symbols { path, action } => match action {
+            Some(crate::cli::SymbolsAction::History { name }) => {
+                analysis::symbol_history(&cli, &name, path.as_deref())
+            }
+            None => analysis::symbols(&cli, path.as_deref()),
+        },
         Commands::Graph => analysis::graph(&cli),
         Commands::Search {
             query,

@@ -11,6 +11,7 @@ pub mod recovery;
 pub mod regressions;
 pub mod stats;
 pub mod structure;
+pub mod symbol_history;
 pub mod symbols;
 
 // Re-export common types

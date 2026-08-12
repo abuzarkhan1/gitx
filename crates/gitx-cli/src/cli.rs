@@ -162,6 +162,8 @@ pub enum Commands {
         /// Restrict to a path prefix.
         #[arg(long)]
         path: Option<String>,
+        #[command(subcommand)]
+        action: Option<SymbolsAction>,
     },
     /// Module/file dependency graph of the HEAD tree (docs/21 Stage 6).
     Graph,
@@ -273,6 +275,13 @@ pub enum ArchitectureAction {
         #[arg(long, default_value_t = 1000)]
         max: usize,
     },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum SymbolsAction {
+    /// Life of a symbol: when it was added, moved, or removed along the
+    /// mainline (docs/21 Stage 6).
+    History { name: String },
 }
 
 #[derive(Subcommand, Debug, Clone, Copy)]

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 gitx-core = { path = "../gitx-core" }
 gitx-git = { path = "../gitx-git" }
+gitx-history = { path = "../gitx-history" }
 anyhow = { workspace = true }
 chrono = { version = "0.4.34", features = ["serde"] }
 rayon = "1.10"
