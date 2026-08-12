@@ -32,7 +32,9 @@ pub enum Detail {
 
 /// Progress messages from the background repository loader (docs/08 §6:
 /// operation name, processed/total, cancellation). The worker reports each
-/// stage as it completes; the final message carries the loaded data.
+/// stage as it completes; a partial dataset lands first (Overview
+/// essentials, docs/13 §7 lazy loading) and the final message carries the
+/// complete data.
 pub enum LoadMsg {
     /// A stage completed: human-readable name + step index + total steps.
     Progress {
@@ -40,6 +42,9 @@ pub enum LoadMsg {
         step: usize,
         total: usize,
     },
+    /// A partial dataset: the Overview essentials, sent before the heavy
+    /// panels finish so the UI paints immediately. `loading` stays true.
+    Phase { data: Box<AppData> },
     /// The full repository data set landed. Boxed so the tiny `Progress`
     /// variant stays small (clippy::large_enum_variant).
     Done(Box<AppData>),
@@ -226,8 +231,10 @@ impl App {
         }
     }
 
-    /// Apply the background-loaded repository data (docs/08 loading progress).
-    pub fn apply_data(&mut self, data: AppData) {
+    /// Merge a partial or final dataset into the app state (docs/13 §7 lazy
+    /// loading). `apply_phase` keeps `loading` true; [`App::apply_data`]
+    /// marks the load complete.
+    fn merge_data(&mut self, data: AppData) {
         self.error = data.error;
         self.stats = data.stats;
         self.timeline = data.timeline;
@@ -247,6 +254,18 @@ impl App {
         self.commit_files = data.commit_files;
         self.arch_diff = data.arch_diff;
         self.graph_summary = data.graph_summary;
+    }
+
+    /// Apply a partial dataset (Overview essentials). `loading` stays true
+    /// until the final [`App::apply_data`] lands (docs/13 §7).
+    pub fn apply_phase(&mut self, data: AppData) {
+        self.merge_data(data);
+    }
+
+    /// Apply the final background-loaded repository data (docs/08 loading
+    /// progress): merge everything and mark the load complete.
+    pub fn apply_data(&mut self, data: AppData) {
+        self.merge_data(data);
         self.loading = false;
         // Data changed: invalidate stale search results.
         self.search_results = None;
@@ -290,6 +309,10 @@ impl App {
                 self.load_phase = phase;
                 self.load_step = step;
                 self.load_total = total;
+                false
+            }
+            Ok(LoadMsg::Phase { data }) => {
+                self.apply_phase(*data);
                 false
             }
             Ok(LoadMsg::Done(data)) => {
@@ -696,6 +719,11 @@ fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::at
     let path = repo.work_dir().map(|p| p.display().to_string());
     let repo_state = repo.state();
 
+    // ======================================================================
+    // Phase A — Overview essentials (docs/13 §7 lazy loading): stats,
+    // timeline, per-commit areas and activity land first so the Overview
+    // paints immediately; the heavy panels fill in during Phase B.
+    // ======================================================================
     // Services layer (docs/04 §6): statistics and analysis go through
     // `RepositoryService`/`AnalysisService`, which prefer the fresh persisted
     // index and fall back to live Git computation (docs/13 §3).
@@ -713,6 +741,107 @@ fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::at
             ..Default::default()
         })
         .ok();
+
+    // Changed-file count + top affected directory per timeline commit
+    // (docs/08 Timeline column, Commit view affected-areas).
+    let per_commit_areas = timeline.as_ref().map(|commits| {
+        commits
+            .iter()
+            .map(|c| {
+                let parent_tree = match c.parents.first() {
+                    Some(parent) => repo.find_commit(*parent).ok().map(|p| p.tree_id),
+                    None => None,
+                };
+                let changes = repo
+                    .diff_tree_to_tree(parent_tree, c.tree_id)
+                    .unwrap_or_default();
+                let mut dirs: std::collections::HashMap<String, u32> =
+                    std::collections::HashMap::new();
+                let mut files: Vec<String> = Vec::new();
+                for change in &changes {
+                    files.push(change.path.display().to_string());
+                    let dir = change
+                        .path
+                        .parent()
+                        .filter(|p| !p.as_os_str().is_empty())
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| ".".to_string());
+                    *dirs.entry(dir).or_insert(0) += 1;
+                }
+                let top = dirs.into_iter().max_by_key(|(_, n)| *n).map(|(d, _)| d);
+                (changes.len() as u32, top.unwrap_or_default(), files)
+            })
+            .collect::<Vec<(u32, String, Vec<String>)>>()
+    });
+    let timeline_file_counts = per_commit_areas
+        .as_ref()
+        .map(|v| v.iter().map(|(n, _, _)| *n).collect());
+    let timeline_areas = per_commit_areas
+        .as_ref()
+        .map(|v| v.iter().map(|(_, a, _)| a.clone()).collect());
+    // Changed-file sets per commit (docs/08 Commit view related-commits).
+    let commit_files = per_commit_areas
+        .as_ref()
+        .map(|v| v.iter().map(|(_, _, f)| f.clone()).collect());
+
+    // Weekly commit counts, last 12 weeks (docs/08 Overview activity chart).
+    let activity = timeline.as_ref().map(|commits| {
+        let now = chrono::Utc::now();
+        let mut buckets: Vec<(String, u32)> = (0..12)
+            .map(|i| {
+                let week = now - chrono::Duration::weeks(i);
+                (
+                    format!("{}-W{:02}", week.format("%G"), week.iso_week().week()),
+                    0,
+                )
+            })
+            .collect();
+        buckets.reverse();
+        for c in commits {
+            let Some(dt) = chrono::DateTime::from_timestamp(c.author.time, 0) else {
+                continue;
+            };
+            let label = format!("{}-W{:02}", dt.format("%G"), dt.iso_week().week());
+            if let Some(bucket) = buckets.iter_mut().find(|(l, _)| *l == label) {
+                bucket.1 += 1;
+            }
+        }
+        buckets
+    });
+
+    // Phase A lands now: the Overview, Timeline and Commits views render
+    // immediately; `loading` stays true until Phase B completes. The Phase
+    // payload carries clones so the originals survive for the final Done
+    // (which must contain the complete dataset, never None placeholders).
+    let _ = tx.send(LoadMsg::Phase {
+        data: Box::new(AppData {
+            stats: stats.clone(),
+            timeline: timeline.clone(),
+            hotspots: None,
+            branches: None,
+            contributors: None,
+            dependencies: None,
+            recovery: None,
+            repo_path: path.clone(),
+            error: None,
+            activity: activity.clone(),
+            timeline_file_counts: timeline_file_counts.clone(),
+            timeline_areas: timeline_areas.clone(),
+            branch_tips: None,
+            branch_intel: None,
+            repo_state: repo_state.clone(),
+            health_evidence: Vec::new(),
+            commit_files: commit_files.clone(),
+            arch_diff: None,
+            graph_summary: None,
+        }),
+    });
+
+    // ======================================================================
+    // Phase B — heavy panels (docs/13 §7): hotspots/health, branches,
+    // contributors, architecture, dependencies, recovery and the graph
+    // summary. Each stage still honors Esc-cancel between stages.
+    // ======================================================================
     if report(tx, cancel, 3, "Analyzing hotspots & health") {
         return;
     }
@@ -785,87 +914,9 @@ fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::at
         list
     });
 
-    // Changed-file count + top affected directory per timeline commit
-    // (docs/08 Timeline column, Commit view affected-areas).
-    let per_commit_areas = timeline.as_ref().map(|commits| {
-        commits
-            .iter()
-            .map(|c| {
-                let parent_tree = match c.parents.first() {
-                    Some(parent) => repo.find_commit(*parent).ok().map(|p| p.tree_id),
-                    None => None,
-                };
-                let changes = repo
-                    .diff_tree_to_tree(parent_tree, c.tree_id)
-                    .unwrap_or_default();
-                let mut dirs: std::collections::HashMap<String, u32> =
-                    std::collections::HashMap::new();
-                let mut files: Vec<String> = Vec::new();
-                for change in &changes {
-                    files.push(change.path.display().to_string());
-                    let dir = change
-                        .path
-                        .parent()
-                        .filter(|p| !p.as_os_str().is_empty())
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_else(|| ".".to_string());
-                    *dirs.entry(dir).or_insert(0) += 1;
-                }
-                let top = dirs.into_iter().max_by_key(|(_, n)| *n).map(|(d, _)| d);
-                (changes.len() as u32, top.unwrap_or_default(), files)
-            })
-            .collect::<Vec<(u32, String, Vec<String>)>>()
-    });
     if report(tx, cancel, 4, "Reading branches & contributors") {
         return;
     }
-    let timeline_file_counts = per_commit_areas
-        .as_ref()
-        .map(|v| v.iter().map(|(n, _, _)| *n).collect());
-    let timeline_areas = per_commit_areas
-        .as_ref()
-        .map(|v| v.iter().map(|(_, a, _)| a.clone()).collect());
-    // Changed-file sets per commit (docs/08 Commit view related-commits).
-    let commit_files = per_commit_areas
-        .as_ref()
-        .map(|v| v.iter().map(|(_, _, f)| f.clone()).collect());
-
-    if report(tx, cancel, 5, "Architecture & activity") {
-        return;
-    }
-    // Architecture before/after (docs/08 Architecture view, docs/10 §10):
-    // HEAD vs the newest commit ≥30 days old (falling back to the oldest
-    // commit in the window).
-    let arch_diff = compute_arch_diff(&repo, timeline.as_deref()).ok().flatten();
-    // Module graph summary (docs/21 Stage 6): per-directory file/import/call
-    // counts for the Graph view, computed once here and cached.
-    let graph_summary = gitx_graph::graph::module_summary(&repo).ok();
-
-    // Weekly commit counts, last 12 weeks (docs/08 Overview activity chart).
-    let activity = timeline.as_ref().map(|commits| {
-        let now = chrono::Utc::now();
-        let mut buckets: Vec<(String, u32)> = (0..12)
-            .map(|i| {
-                let week = now - chrono::Duration::weeks(i);
-                (
-                    format!("{}-W{:02}", week.format("%G"), week.iso_week().week()),
-                    0,
-                )
-            })
-            .collect();
-        buckets.reverse();
-        for c in commits {
-            let Some(dt) = chrono::DateTime::from_timestamp(c.author.time, 0) else {
-                continue;
-            };
-            let label = format!("{}-W{:02}", dt.format("%G"), dt.iso_week().week());
-            if let Some(bucket) = buckets.iter_mut().find(|(l, _)| *l == label) {
-                bucket.1 += 1;
-            }
-        }
-        buckets
-    });
-
     // Tip-commit timestamp per branch (docs/08 Branch view age + activity).
     let branch_tips = branches.as_ref().map(|list| {
         list.iter()
@@ -899,6 +950,17 @@ fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::at
             .collect()
     });
 
+    if report(tx, cancel, 5, "Architecture & activity") {
+        return;
+    }
+    // Architecture before/after (docs/08 Architecture view, docs/10 §10):
+    // HEAD vs the newest commit ≥30 days old (falling back to the oldest
+    // commit in the window).
+    let arch_diff = compute_arch_diff(&repo, timeline.as_deref()).ok().flatten();
+    // Module graph summary (docs/21 Stage 6): per-directory file/import/call
+    // counts for the Graph view, computed once here and cached.
+    let graph_summary = gitx_graph::graph::module_summary(&repo).ok();
+
     if report(tx, cancel, 6, "Dependencies & recovery") {
         return;
     }
@@ -914,6 +976,8 @@ fn load_repo_stats(tx: &std::sync::mpsc::Sender<LoadMsg>, cancel: &std::sync::at
     // number). Index order matches the six sub-scores.
     let health_evidence = build_health_evidence(hotspots.as_ref());
 
+    // The final message carries the complete dataset: the Phase A values
+    // (kept alive by the clones in the Phase send) plus the Phase B panels.
     let _ = tx.send(LoadMsg::Done(Box::new(AppData {
         stats,
         timeline,

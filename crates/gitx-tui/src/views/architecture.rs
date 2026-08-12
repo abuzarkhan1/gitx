@@ -15,6 +15,7 @@ pub fn render(
     area: Rect,
     arch_diff: Option<&ArchDiff>,
     analysis: Option<&gitx_analysis::RepoAnalysis>,
+    loading: bool,
     scroll: usize,
     selected: usize,
 ) -> usize {
@@ -22,6 +23,12 @@ pub fn render(
 
     // ── Before/after comparison ─────────────────────────────────────
     match arch_diff {
+        None if loading => {
+            rows.push(theme::plain("Loading architecture analysis…"));
+            rows.push(theme::dim(
+                "  Background load in progress — the panel fills in when ready.",
+            ));
+        }
         None => {
             rows.push(theme::plain("No structural comparison available."));
             rows.push(theme::dim(

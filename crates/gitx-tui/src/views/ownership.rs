@@ -6,11 +6,12 @@ pub fn render(
     f: &mut Frame,
     area: Rect,
     analysis: Option<&RepoAnalysis>,
+    loading: bool,
     scroll: usize,
     selected: usize,
 ) -> usize {
     let rows: Vec<Line<'static>> = match analysis {
-        None => common::empty_rows("repository"),
+        None => common::panel_placeholder(loading, "ownership analysis"),
         Some(a) => {
             let mut files: Vec<&gitx_analysis::FileAnalysis> = a
                 .files

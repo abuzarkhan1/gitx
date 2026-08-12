@@ -52,6 +52,52 @@ mkdir -p "$FIX" "$OUT"
 
 [ -x "$BIN" ] || { echo "build gitx-tui first: cargo build -p gitx-tui"; exit 1; }
 
+# ── lazy loading (docs/13 §7), in its own session so the main flow starts
+#    from a clean nav state: the Overview must paint real stats from Phase A
+#    while the heavy panels still load in the background ────────────────
+tmux kill-session -t gitxlazy 2>/dev/null
+tmux new-session -d -s gitxlazy -x 140 -y 44
+tmux send-keys -t gitxlazy "cd $FIX && TERM=xterm-256color $BIN" Enter
+LAZY_OK=0
+for _ in $(seq 1 20); do
+  tmux capture-pane -t gitxlazy -p > "$OUT/00_lazy_overview.txt"
+  if grep -aq "Repository size" "$OUT/00_lazy_overview.txt"; then LAZY_OK=1; break; fi
+  sleep 0.2
+done
+if [ "$LAZY_OK" = 1 ]; then
+  echo "  PASS  Overview paints Phase A stats at startup (lazy)"
+  PASS=$((PASS + 1))
+else
+  echo "  FAIL  Overview stats did not paint within ~4s"
+  FAIL=$((FAIL + 1))
+fi
+# If a load stage is still visible in that frame, the Overview must already
+# be populated (phased loading) — never the eager-loading placeholder.
+if grep -aq "Esc cancel" "$OUT/00_lazy_overview.txt"; then
+  if grep -aq "Loading repository data" "$OUT/00_lazy_overview.txt"; then
+    echo "  FAIL  Overview shows placeholder while a load stage is running"
+    FAIL=$((FAIL + 1))
+  else
+    echo "  PASS  Overview populated while load still in progress (phased)"
+    PASS=$((PASS + 1))
+  fi
+else
+  echo "  PASS  load completed before first Overview frame (tiny fixture)"
+  PASS=$((PASS + 1))
+fi
+# A heavy panel visited early shows its loading placeholder (or real data),
+# never the misleading "run gitx refresh" empty state while the load runs.
+tmux send-keys -t gitxlazy v; sleep 0.3
+tmux capture-pane -t gitxlazy -p > "$OUT/00_lazy_recovery.txt"
+if grep -aq "Run: gitx refresh" "$OUT/00_lazy_recovery.txt"; then
+  echo "  FAIL  Recovery shows empty-state while loading"
+  FAIL=$((FAIL + 1))
+else
+  echo "  PASS  Recovery visited early: no misleading empty state"
+  PASS=$((PASS + 1))
+fi
+tmux kill-session -t gitxlazy 2>/dev/null
+
 tmux kill-session -t "$SESS" 2>/dev/null
 tmux new-session -d -s "$SESS" -x 140 -y 44
 tmux send-keys -t "$SESS" "cd $FIX && TERM=xterm-256color $BIN" Enter

@@ -10,6 +10,7 @@ pub fn render(
     f: &mut Frame,
     area: Rect,
     summary: Option<&[(String, usize, usize, usize)]>,
+    loading: bool,
     scroll: usize,
     selected: usize,
 ) -> usize {
@@ -22,6 +23,13 @@ pub fn render(
     ));
 
     match summary {
+        None if loading => {
+            rows.push(Line::default());
+            rows.push(theme::plain("Loading graph data…"));
+            rows.push(theme::dim(
+                "  Background load in progress — the panel fills in when ready.",
+            ));
+        }
         None => {
             rows.push(Line::default());
             rows.push(theme::plain("No graph data available."));

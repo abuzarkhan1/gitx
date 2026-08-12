@@ -236,16 +236,23 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             app.branches.as_deref(),
             app.branch_tips.as_deref(),
             app.branch_intel.as_deref(),
+            app.loading,
             app.scroll,
             app.selected,
         ),
-        View::Files => {
-            views::files::render(f, area, app.hotspots.as_ref(), app.scroll, app.selected)
-        }
+        View::Files => views::files::render(
+            f,
+            area,
+            app.hotspots.as_ref(),
+            app.loading,
+            app.scroll,
+            app.selected,
+        ),
         View::Contributors => views::contributors::render(
             f,
             area,
             app.contributors.as_deref(),
+            app.loading,
             app.scroll,
             app.selected,
         ),
@@ -254,17 +261,24 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             area,
             app.hotspots.as_ref(),
             app.hotspot_sort,
+            app.loading,
             app.scroll,
             app.selected,
         ),
-        View::Ownership => {
-            views::ownership::render(f, area, app.hotspots.as_ref(), app.scroll, app.selected)
-        }
+        View::Ownership => views::ownership::render(
+            f,
+            area,
+            app.hotspots.as_ref(),
+            app.loading,
+            app.scroll,
+            app.selected,
+        ),
         View::Architecture => views::architecture::render(
             f,
             area,
             app.arch_diff.as_ref(),
             app.hotspots.as_ref(),
+            app.loading,
             app.scroll,
             app.selected,
         ),
@@ -272,14 +286,27 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             f,
             area,
             app.dependencies.as_deref(),
+            app.loading,
             app.scroll,
             app.selected,
         ),
-        View::Risk => views::risk::render(f, area, app.hotspots.as_ref(), app.scroll, app.selected),
+        View::Risk => views::risk::render(
+            f,
+            area,
+            app.hotspots.as_ref(),
+            app.loading,
+            app.scroll,
+            app.selected,
+        ),
         View::Health => views::health::render(f, area, app),
-        View::Recovery => {
-            views::recovery::render(f, area, app.recovery.as_ref(), app.scroll, app.selected)
-        }
+        View::Recovery => views::recovery::render(
+            f,
+            area,
+            app.recovery.as_ref(),
+            app.loading,
+            app.scroll,
+            app.selected,
+        ),
         View::Search => views::search::render(
             f,
             area,
@@ -294,6 +321,7 @@ fn render_content(f: &mut Frame, app: &mut App, area: Rect) {
             f,
             area,
             app.graph_summary.as_deref(),
+            app.loading,
             app.scroll,
             app.selected,
         ),

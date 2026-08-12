@@ -61,6 +61,20 @@ pub fn empty_rows(kind: &str) -> Vec<Line<'static>> {
     ]
 }
 
+/// Heavy-panel placeholder while the background loader is still running
+/// (docs/13 §7 lazy loading): an honest "still loading" message instead of
+/// the misleading "no data / run gitx refresh" empty state.
+pub fn panel_placeholder(loading: bool, kind: &str) -> Vec<Line<'static>> {
+    if loading {
+        vec![
+            theme::plain(format!("Loading {kind}…")),
+            theme::dim("Background load in progress — the panel fills in when ready."),
+        ]
+    } else {
+        empty_rows(kind)
+    }
+}
+
 /// A dimmed one-line description of what the current view shows (docs/25
 /// evidence-first output: the user always knows what they are looking at).
 pub fn desc(text: &str) -> Line<'static> {

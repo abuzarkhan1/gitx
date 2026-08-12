@@ -6,11 +6,12 @@ pub fn render(
     f: &mut Frame,
     area: Rect,
     contributors: Option<&[Contributor]>,
+    loading: bool,
     scroll: usize,
     selected: usize,
 ) -> usize {
     let rows: Vec<Line<'static>> = match contributors {
-        None => common::empty_rows("repository"),
+        None => common::panel_placeholder(loading, "contributor analysis"),
         Some([]) => vec![theme::plain("No contributors found.")],
         Some(list) => {
             let total: u64 = list.iter().map(|c| c.commits).sum::<u64>().max(1);

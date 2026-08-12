@@ -8,17 +8,19 @@ use ratatui::{
     text::{Line, Span},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
     branches: Option<&[Branch]>,
     branch_tips: Option<&[i64]>,
     intel: Option<&[Option<BranchIntelligence>]>,
+    loading: bool,
     scroll: usize,
     selected: usize,
 ) -> usize {
     let rows: Vec<Line<'static>> = match branches {
-        None => common::empty_rows("branches"),
+        None => common::panel_placeholder(loading, "branches"),
         Some([]) => vec![theme::plain("No branches found.")],
         Some(branches) => branches
             .iter()

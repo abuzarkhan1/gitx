@@ -12,11 +12,12 @@ pub fn render(
     f: &mut Frame,
     area: Rect,
     dependencies: Option<&[(PathBuf, Vec<Dependency>)]>,
+    loading: bool,
     scroll: usize,
     selected: usize,
 ) -> usize {
     let rows: Vec<Line<'static>> = match dependencies {
-        None => common::empty_rows("repository"),
+        None => common::panel_placeholder(loading, "dependency analysis"),
         Some([]) => vec![
             theme::plain("No supported dependency manifests found in HEAD."),
             theme::dim("Supported: Cargo.toml/lock, package.json/lock, go.mod/sum."),

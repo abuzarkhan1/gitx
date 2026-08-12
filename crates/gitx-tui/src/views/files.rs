@@ -11,11 +11,12 @@ pub fn render(
     f: &mut Frame,
     area: Rect,
     analysis: Option<&RepoAnalysis>,
+    loading: bool,
     scroll: usize,
     selected: usize,
 ) -> usize {
     let rows: Vec<Line<'static>> = match analysis {
-        None => common::empty_rows("repository"),
+        None => common::panel_placeholder(loading, "repository analysis"),
         Some(a) if a.files.is_empty() => vec![theme::plain("No files analyzed.")],
         Some(a) => a
             .files

@@ -10,7 +10,14 @@ use ratatui::{
 /// never just a number (docs/10 §8, docs/25).
 pub fn render(f: &mut Frame, area: Rect, app: &App) -> usize {
     let Some(analysis) = &app.hotspots else {
-        common::render_scrollable(f, area, " Health ", &common::empty_rows("health"), 0, 0);
+        common::render_scrollable(
+            f,
+            area,
+            " Health ",
+            &common::panel_placeholder(app.loading, "health analysis"),
+            0,
+            0,
+        );
         return 1;
     };
     let h = &analysis.health;

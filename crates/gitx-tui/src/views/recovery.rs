@@ -11,11 +11,12 @@ pub fn render(
     f: &mut Frame,
     area: Rect,
     recovery: Option<&RecoveryReport>,
+    loading: bool,
     scroll: usize,
     selected: usize,
 ) -> usize {
     let rows: Vec<Line<'static>> = match recovery {
-        None => common::empty_rows("repository"),
+        None => common::panel_placeholder(loading, "recovery report"),
         Some(r) => {
             let mut out = vec![theme::strong(
                 format!(
