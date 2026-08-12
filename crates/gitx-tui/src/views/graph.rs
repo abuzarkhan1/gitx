@@ -27,7 +27,7 @@ pub fn render(
             rows.push(theme::plain("No graph data available."));
             rows.push(theme::dim("  Run: gitx refresh"));
         }
-        Some(list) if list.is_empty() => {
+        Some([]) => {
             rows.push(Line::default());
             rows.push(theme::plain("No source modules found in HEAD."));
         }
