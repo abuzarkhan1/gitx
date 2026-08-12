@@ -9,6 +9,10 @@ Follow Semantic Versioning (`MAJOR.MINOR.PATCH`). The application version
 lives in `Cargo.toml` (`[workspace.package] version`) and is inherited by
 every crate (`version.workspace = true`).
 
+**`Cargo.lock` is committed** (binary workspace; `--locked` installs in
+docs/18 §9 depend on it). Bump it deliberately with `cargo update` and always
+verify `cargo build --locked` in the checklist.
+
 The **SQLite index schema is versioned independently** (`schema_version` in
 `index_metadata`, migrations in `migrations/`). Bumping the app version never
 forces an index migration, and vice versa. Incompatible index formats must be
