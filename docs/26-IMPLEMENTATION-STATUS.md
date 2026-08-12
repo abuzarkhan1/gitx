@@ -800,10 +800,27 @@ suite green, clippy `-D warnings` clean.
   flagged; forward moves, untouched refs, and non-HEAD branch changes are
   not) and stays covered by the existing rewrite test.
 - **Analysis-cache freshness skip** — a no-op refresh no longer re-runs the
-  full live analysis when the cache is already fresh for HEAD. Remaining
-  hot spot (documented): the analysis cache is keyed to HEAD, so the first
-  command after a new commit still recomputes analysis in O(history)
-  (~3 s on 9k commits); an incremental analysis cache is future work.
+  full live analysis when the cache is already fresh for HEAD.
+
+## Tenth implementation pass (incremental analysis cache, all verified)
+
+Closed the last O(history) hot spot from the large-repo pass: the analysis
+cache was keyed to HEAD, so the first command after a new commit recomputed
+analysis from scratch (~3 s on 9k commits). A new incremental path
+(`gitx_analysis::incremental`, schema v4 adds `file_ownership.lines`)
+applies the new commits' delta — a bounded boundary walk mirroring the
+pipeline's per-commit accumulation — to the persisted per-file aggregates,
+then re-normalizes hotspot/risk/health across the current file set and
+recomputes health via the shared `compute_health_with` (keeping the stored
+recovery sub-score, which cannot change from new commits). File-level metrics
+stay bit-exact (integration test compares against a fresh full analysis);
+windowed scoring signals read the persisted columns, matching the cache
+path's existing fidelity, and a full `gitx index rebuild` reconciles drift.
+Falls back to the full pipeline when preconditions fail (no cache, rewritten
+history, >200 new commits, analysis head unreachable) — covered by tests.
+Live on the 9k-commit clone: `gitx refresh` after a real content commit
+2.9 s → **0.04 s**; evidence counters stacked exactly across successive
+increments; timings in `benches/RESULTS.md`.
 
 ## Deliberate non-goals preserved
 

@@ -70,12 +70,21 @@ impl<'a> IndexService<'a> {
         // large repositories; with a fresh cache the walk is skipped entirely
         // and reads keep coming from SQLite (docs/13 §3 sub-second reads).
         let analysis_fresh = gitx_analysis::cache::is_fresh(&conn.borrow(), self.repo);
-        if !analysis_fresh
-            && let Ok(analysis) = gitx_analysis::analyze_repository(self.repo)
-            && let Ok(head) = self.repo.head_commit_id()
-        {
+        if !analysis_fresh {
             let mut conn = conn.borrow_mut();
-            let _ = gitx_analysis::cache::store(&mut conn, self.repo, &analysis, &head.to_string());
+            // Fast path (docs/13 §3): when the index walk was incremental and
+            // the delta is small, apply the new commits to the persisted
+            // analysis instead of re-walking history. Falls back to the full
+            // pipeline on any unmet precondition or error.
+            let updated = gitx_analysis::incremental::try_update_incremental(&mut conn, self.repo)
+                .unwrap_or(false);
+            if !updated
+                && let Ok(analysis) = gitx_analysis::analyze_repository(self.repo)
+                && let Ok(head) = self.repo.head_commit_id()
+            {
+                let _ =
+                    gitx_analysis::cache::store(&mut conn, self.repo, &analysis, &head.to_string());
+            }
         }
         Ok(count as u64)
     }

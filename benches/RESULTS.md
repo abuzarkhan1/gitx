@@ -48,17 +48,38 @@ Three fixes landed during this pass, so numbers are recorded before/after:
 |---|---|---|
 | first-run `gitx health` (auto-refresh: full scan + analysis) | ~60 s | **3.66 s** |
 | no-op `gitx refresh` | ~16.5 s | **0.03 s** |
-| `gitx refresh` after +1 commit | ~16.5 s | **2.9 s** |
+| `gitx refresh` after +1 commit | ~16.5 s | **2.9 s** → **0.04 s** |
 | cached `gitx health` | — | **0.00 s** |
 | cached `gitx hotspots` | — | **0.01 s** |
 | `gitx search` (lazy in-memory index) | — | **0.26 s** |
 | TUI Overview first paint (index-backed) | — | **~0.95 s** |
 
 Cached reads stay sub-second on the 9k-commit repo (docs/13 §3 targets), and
-TUI startup is sub-second with a valid index. The remaining hot spot is the
-**analysis recompute** after HEAD moves (the `+1 commit` case): the analysis
-cache is keyed to HEAD and recomputed from scratch, so it is still
-O(history) — ~3 s here. Making the analysis cache incremental is future work.
+TUI startup is sub-second with a valid index.
+
+## 2026-08-13 — Incremental analysis cache (same clap clone)
+
+Fourth fix: the analysis cache was keyed to HEAD and recomputed from scratch
+on every move — the `+1 commit` case above still paid an O(history) analysis
+walk (~3 s). A new incremental path (`gitx_analysis::incremental`, schema v4)
+applies the new commits' delta to the persisted per-file aggregates, then
+re-normalizes hotspot/risk/health across the current file set. File-level
+metrics stay bit-exact (verified by an integration test comparing against a
+fresh full analysis); windowed scoring signals read the persisted columns,
+matching the cache path's existing fidelity, and a full `gitx index rebuild`
+reconciles windowed drift. Falls back to the full pipeline when preconditions
+fail (no cache, rewritten history, >200 new commits, analysis head unreachable).
+
+| Scenario | Before | After |
+|---|---|---|
+| `gitx refresh` after +1 commit (real content delta) | 2.9 s | **0.04 s** |
+| `gitx refresh` after +1 empty commit | 2.9 s | **0.07 s** |
+| cached `gitx health` after the refresh | 0.00 s | **0.00 s** |
+
+Evidence counters were spot-checked live across successive increments
+(commits 9070 → 9071, total_changes 46261 → 46262, recent_changes 0 → 1,
+health 69.3 → 72.3) and `analysis_head` tracks HEAD.
+
 
 Index correctness on the large repo was spot-checked live: 9,070 commits / 650
 contributors / 631 files / 634 tags, and the TUI Overview rendered all four

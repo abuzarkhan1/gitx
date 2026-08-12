@@ -68,6 +68,13 @@ pub struct RepoAnalysis {
     pub total_commits: u64,
     pub total_contributors: usize,
     pub current_files: usize,
+    /// File-touching changes in the 30-day window (docs/10 §8 change
+    /// volatility). Persisted with the cache so an incremental update can
+    /// keep the health score consistent without a full recompute.
+    pub recent_changes: u64,
+    /// Current files introduced within the 30-day window (docs/10 §8
+    /// architecture stability).
+    pub recently_added: usize,
     pub health: RepoHealth,
     pub analysis_duration_ms: u128,
 }
@@ -394,18 +401,48 @@ pub fn analyze_repository_with(
         total_contributors: author_set.len(),
         current_files: current_set.len(),
         files,
+        recent_changes,
+        recently_added,
         health,
         analysis_duration_ms: started.elapsed().as_millis(),
     })
 }
 
-fn compute_health(
+/// [`compute_health_with`] with the recovery sub-score computed live (the
+/// full-pipeline path).
+pub(crate) fn compute_health(
     repo: &Repository,
     files: &[FileAnalysis],
     total_changes: u64,
     recent_changes: u64,
     recently_added: usize,
     current_files: usize,
+) -> anyhow::Result<RepoHealth> {
+    compute_health_with(
+        repo,
+        files,
+        total_changes,
+        recent_changes,
+        recently_added,
+        current_files,
+        None,
+    )
+}
+
+/// Composite health (docs/10 §8, docs/01 goal G2).
+///
+/// `recovery_risk` overrides the live recovery sub-score when supplied: the
+/// incremental analysis path keeps the stored value (adding commits neither
+/// creates unreachable objects nor empties the reflog, so the score cannot
+/// change) instead of re-walking the whole object database (docs/13 §4).
+pub(crate) fn compute_health_with(
+    repo: &Repository,
+    files: &[FileAnalysis],
+    total_changes: u64,
+    recent_changes: u64,
+    recently_added: usize,
+    current_files: usize,
+    recovery_risk: Option<f64>,
 ) -> anyhow::Result<RepoHealth> {
     let total = files.len().max(1);
 
@@ -451,13 +488,19 @@ fn compute_health(
         (1.0 - recently_added as f64 / current_files as f64) * 100.0
     };
 
-    // Recovery risk: no reflog → nothing recoverable; dangling commits raise risk.
-    let reflog = repo.head_reflog()?;
-    let unreachable = crate::recovery::find_unreachable_commits(repo, Some(10_000))?;
-    let recovery_risk_score = if reflog.is_empty() {
-        100.0
-    } else {
-        (unreachable.len() as f64 * 10.0).min(100.0)
+    // Recovery risk: no reflog → nothing recoverable; dangling commits raise
+    // risk. Skipped (stored value reused) on the incremental path.
+    let recovery_risk_score = match recovery_risk {
+        Some(score) => score,
+        None => {
+            let reflog = repo.head_reflog()?;
+            let unreachable = crate::recovery::find_unreachable_commits(repo, Some(10_000))?;
+            if reflog.is_empty() {
+                100.0
+            } else {
+                (unreachable.len() as f64 * 10.0).min(100.0)
+            }
+        }
     };
 
     Ok(RepoHealth::calculate(

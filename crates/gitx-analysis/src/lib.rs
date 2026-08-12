@@ -3,6 +3,7 @@ pub mod cache;
 pub mod classification;
 pub mod health;
 pub mod hotspots;
+pub mod incremental;
 pub mod manifest;
 pub mod metrics;
 pub mod ownership;

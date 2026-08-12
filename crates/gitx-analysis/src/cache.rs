@@ -84,16 +84,14 @@ pub fn store(
           computed_at = excluded.computed_at",
     )?;
     let mut stmt_ownership = tx.prepare(
-        "INSERT INTO file_ownership (file_id, author_id, contribution_pct) \
-         VALUES (?1, ?2, ?3) \
-         ON CONFLICT(file_id, author_id) DO UPDATE SET contribution_pct = excluded.contribution_pct",
+        "INSERT INTO file_ownership (file_id, author_id, contribution_pct, lines) \
+         VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT(file_id, author_id) DO UPDATE SET \
+          contribution_pct = excluded.contribution_pct, \
+          lines = excluded.lines",
     )?;
     let mut stmt_meta =
         tx.prepare("INSERT OR REPLACE INTO index_metadata (key, value) VALUES (?1, ?2)")?;
-    let mut stmt_metric = tx.prepare(
-        "INSERT OR REPLACE INTO metrics (scope, scope_id, metric_key, metric_value, computed_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-    )?;
 
     for f in &analysis.files {
         let path_str = f.path.display().to_string();
@@ -155,21 +153,81 @@ pub fn store(
             f.classification,
             now,
         ])?;
-        // Top-3 owners by contribution share (docs/06 file_ownership).
-        let mut owners: Vec<(&String, &u64)> = f.author_lines.iter().collect();
-        owners.sort_by_key(|(_, lines)| std::cmp::Reverse(**lines));
+        // Every author with their absolute line count (docs/06
+        // file_ownership): the incremental cache update (docs/13 §3) merges
+        // new commits' per-author lines into these baselines, which requires
+        // the full map — not just the top share. Readers pick top-N by
+        // contribution_pct, so storing all authors changes nothing for them.
         let total: u64 = f.author_lines.values().sum::<u64>().max(1);
-        for (author, lines) in owners.iter().take(3) {
+        for (author, lines) in &f.author_lines {
             let author_id = author_id_for(&tx, author)?;
             stmt_ownership.execute(rusqlite::params![
                 file_id,
                 author_id,
-                (**lines as f64 / total as f64) * 100.0,
+                (*lines as f64 / total as f64) * 100.0,
+                *lines as i64,
             ])?;
         }
     }
 
-    let h = &analysis.health;
+    let total_changes: i64 = analysis
+        .files
+        .iter()
+        .map(|f| f.metrics.change_frequency as i64)
+        .sum();
+    let recent_churn: i64 = analysis
+        .files
+        .iter()
+        .map(|f| f.metrics.lines_added as i64 + f.metrics.lines_deleted as i64)
+        .sum();
+    write_health_metrics(
+        &tx,
+        &analysis.health,
+        analysis.total_commits,
+        analysis.total_contributors,
+        analysis.current_files,
+        analysis.files.len(),
+        total_changes,
+        analysis.recent_changes as i64,
+        analysis.recently_added as i64,
+        recent_churn,
+        now,
+    )?;
+
+    stmt_meta.execute(rusqlite::params!["analysis_head", head_oid])?;
+    stmt_meta.execute(rusqlite::params!["analysis_computed", "1"])?;
+    drop(stmt_metrics);
+    drop(stmt_hotspots);
+    drop(stmt_ownership);
+    drop(stmt_meta);
+    tx.commit()?;
+    Ok(())
+}
+
+/// Persist the composite health sub-scores plus the repo-level evidence the
+/// incremental update needs to stay consistent (docs/13 §3): total changes
+/// (always recomputed from `file_metrics`), windowed change counts and
+/// recently-added files (maintained incrementally; aging out of the 30-day
+/// window is reconciled by the next full scan). Shared by the full cache
+/// store and the incremental update so both write identical rows.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_health_metrics(
+    tx: &rusqlite::Transaction<'_>,
+    h: &crate::health::RepoHealth,
+    commits: u64,
+    contributors: usize,
+    current_files: usize,
+    analyzed_files: usize,
+    total_changes: i64,
+    recent_changes: i64,
+    recently_added: i64,
+    recent_churn: i64,
+    now: i64,
+) -> anyhow::Result<()> {
+    let mut stmt_metric = tx.prepare(
+        "INSERT OR REPLACE INTO metrics (scope, scope_id, metric_key, metric_value, computed_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
     let health_metrics = [
         ("overall", h.overall_score),
         ("code_hotspots", h.code_hotspots_score),
@@ -178,34 +236,18 @@ pub fn store(
         ("change_volatility", h.change_volatility_score),
         ("architecture_stability", h.architecture_stability_score),
         ("recovery_risk", h.recovery_risk_score),
-        ("evidence.commits", analysis.total_commits as f64),
-        ("evidence.contributors", analysis.total_contributors as f64),
-        ("evidence.current_files", analysis.current_files as f64),
-        ("evidence.analyzed_files", analysis.files.len() as f64),
+        ("evidence.commits", commits as f64),
+        ("evidence.contributors", contributors as f64),
+        ("evidence.current_files", current_files as f64),
+        ("evidence.analyzed_files", analyzed_files as f64),
+        ("evidence.total_changes", total_changes as f64),
+        ("evidence.recent_changes", recent_changes as f64),
+        ("evidence.recently_added", recently_added as f64),
+        (RECENT_CHURN_KEY, recent_churn as f64),
     ];
     for (key, value) in health_metrics {
         stmt_metric.execute(rusqlite::params!["health", 0, key, value, now])?;
     }
-    stmt_metric.execute(rusqlite::params![
-        "health",
-        0,
-        RECENT_CHURN_KEY,
-        analysis
-            .files
-            .iter()
-            .map(|f| f.metrics.lines_added as i64 + f.metrics.lines_deleted as i64)
-            .sum::<i64>(),
-        now,
-    ])?;
-
-    stmt_meta.execute(rusqlite::params!["analysis_head", head_oid])?;
-    stmt_meta.execute(rusqlite::params!["analysis_computed", "1"])?;
-    drop(stmt_metrics);
-    drop(stmt_hotspots);
-    drop(stmt_ownership);
-    drop(stmt_meta);
-    drop(stmt_metric);
-    tx.commit()?;
     Ok(())
 }
 
@@ -325,6 +367,8 @@ pub fn load(conn: &Connection) -> anyhow::Result<Option<RepoAnalysis>> {
         total_commits: health_value(conn, "evidence.commits").unwrap_or(0.0) as u64,
         total_contributors: health_value(conn, "evidence.contributors").unwrap_or(0.0) as usize,
         current_files: health_value(conn, "evidence.current_files").unwrap_or(0.0) as usize,
+        recent_changes: health_value(conn, "evidence.recent_changes").unwrap_or(0.0) as u64,
+        recently_added: health_value(conn, "evidence.recently_added").unwrap_or(0.0) as usize,
         health,
         analysis_duration_ms: 0,
     }))
@@ -342,7 +386,7 @@ fn load_health(conn: &Connection) -> anyhow::Result<crate::health::RepoHealth> {
     })
 }
 
-fn health_value(conn: &Connection, key: &str) -> Option<f64> {
+pub(crate) fn health_value(conn: &Connection, key: &str) -> Option<f64> {
     conn.query_row(
         "SELECT metric_value FROM metrics WHERE scope = 'health' AND metric_key = ?1",
         [key],
@@ -353,7 +397,7 @@ fn health_value(conn: &Connection, key: &str) -> Option<f64> {
 
 /// Resolve (or insert) an author by `Name <email>` key. Author rows are keyed
 /// by name+email in the index schema.
-fn author_id_for(tx: &rusqlite::Transaction<'_>, key: &str) -> anyhow::Result<i64> {
+pub(crate) fn author_id_for(tx: &rusqlite::Transaction<'_>, key: &str) -> anyhow::Result<i64> {
     let (name, email) = match key.split_once(" <") {
         Some((n, rest)) => (n.to_string(), rest.trim_end_matches('>').to_string()),
         None => (key.to_string(), String::new()),

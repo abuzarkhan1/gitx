@@ -307,10 +307,25 @@ END;
 UPDATE index_metadata SET value = '3' WHERE key = 'schema_version';
 "#;
 
+/// Mirrored on disk in `migrations/0004_incremental_analysis.sql` — keep both
+/// in sync.
+///
+/// v4 supports the incremental analysis cache (docs/13 §3): `file_ownership`
+/// gains an absolute per-author line count so a refresh can apply the delta
+/// of new commits to ownership shares instead of recomputing the whole
+/// analysis. Rows written before v4 keep a default of 0 and are only read
+/// when an incremental update touches that file, where the missing baseline
+/// is resolved by the next full scan.
+const SCHEMA_V4: &str = r#"
+ALTER TABLE file_ownership ADD COLUMN lines INTEGER NOT NULL DEFAULT 0;
+
+UPDATE index_metadata SET value = '4' WHERE key = 'schema_version';
+"#;
+
 /// The newest schema version this build understands (docs/18 §7: indexes
 /// written by a *newer* build must be detected and explained, not silently
 /// read or overwritten).
-pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+pub const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 /// Read the stored schema version without applying migrations. `None` when
 /// the metadata table is missing (a v0/empty database).
@@ -372,6 +387,10 @@ pub fn apply_migrations(conn: &mut Connection) -> Result<()> {
         tx.execute_batch(SCHEMA_V3)?;
     }
 
+    if version < 4 {
+        tx.execute_batch(SCHEMA_V4)?;
+    }
+
     tx.commit()?;
     Ok(())
 }
@@ -399,7 +418,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "3");
+        assert_eq!(version, "4");
     }
 
     #[test]
@@ -600,7 +619,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "3");
+        assert_eq!(version, "4");
 
         // The corrected trigger must delete without error.
         conn.execute("DELETE FROM commits WHERE oid = 'deadbeef'", [])
@@ -635,7 +654,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(version, "3");
+        assert_eq!(version, "4");
         let n: i64 = conn
             .query_row(
                 "SELECT count(*) FROM commits_fts WHERE commits_fts MATCH 'legacy'",

@@ -44,6 +44,11 @@ Common queries should normally feel instantaneous:
 
 For a small number of new commits, refresh should process only affected history and derived metrics.
 
+Implemented: the index walk stops at already-indexed boundaries (O(new
+commits) objects) and the analysis cache is updated by applying the new
+commits' delta to the persisted per-file aggregates (docs/26 pass 10). A
+full `gitx index rebuild` reconciles windowed-signal drift.
+
 ## 4. Large repository behavior
 
 Never load the complete repository history into RAM if a streaming/query approach is sufficient.
