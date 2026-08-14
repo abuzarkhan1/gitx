@@ -1,479 +1,515 @@
-/* GitX — terminal theme.
-   Two colors only: green (#33ff66) and amber (#ffb000) on black.
-   Flat. No gradients. No rounded cards. No shadows. Just a terminal. */
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Space+Grotesk:wght@300;400;500;600;700;800;900&display=swap');
 
 :root {
-  --bg: #000000;
-  --green: #33ff66;
-  --amber: #ffb000;
-  --dim: rgba(51, 255, 102, 0.55);   /* muted green — same hue, just dimmer */
-  --faint: rgba(51, 255, 102, 0.3);  /* even dimmer — for borders, prompts */
-  --line: rgba(51, 255, 102, 0.22);  /* borders between terminal sections */
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
-    "Liberation Mono", "DejaVu Sans Mono", monospace;
+  --bg: #08080a;
+  --bg-surface: #0c0c10;
+  --bg-card: #111115;
+  --fg: #ffffff;
+  --fg-secondary: #d4d4d8;
+  --muted: #a1a1aa;
+  --faint: #71717a;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-hover: rgba(255, 255, 255, 0.22);
+
+  --font-space: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Monaco, Consolas, monospace;
+
+  --section-py-lg: 6.5rem;
+  --section-py-md: 4.5rem;
+  --section-py-sm: 3.25rem;
+  --container-px: 1.5rem;
 }
 
-* {
+@media (max-width: 640px) {
+  :root {
+    --container-px: 1rem;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
-  box-sizing: border-box;
+  font-family: var(--font-space);
 }
 
 html {
-  background: var(--bg);
+  color-scheme: dark;
+  scroll-behavior: smooth;
+  background-color: var(--bg);
+  color: var(--fg);
 }
 
 body {
   background: var(--bg);
-  color: var(--green);
-  font-family: var(--mono);
-  font-size: 15px;
+  color: var(--fg);
+  font-family: var(--font-space);
+  font-weight: 400;
   line-height: 1.6;
+  overflow-x: hidden;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-::selection {
-  background: var(--green);
-  color: #000;
+p, span, a, li, label, strong, em, small, blockquote, figcaption {
+  font-family: var(--font-space);
 }
 
-/* --- scrollbar -------------------------------------------------------- */
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-track {
-  background: #000;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--faint);
-  border: 2px solid #000;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--dim);
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-space);
+  letter-spacing: -0.04em;
+  font-weight: 800;
 }
 
-/* --- links ------------------------------------------------------------ */
+button, input, select, textarea {
+  font-family: var(--font-space);
+}
 
-a {
-  color: var(--green);
-  text-decoration: none;
-  border-bottom: 1px solid var(--faint);
-  padding-bottom: 1px;
+code, pre, kbd, samp, .font-mono {
+  font-family: var(--font-mono);
 }
-a:hover {
-  color: var(--amber);
-  border-bottom-color: var(--amber);
-}
-a:focus-visible {
-  outline: 1px dashed var(--amber);
+
+*:focus-visible {
+  outline: 2px solid #ffffff;
   outline-offset: 2px;
 }
 
-/* --- layout ----------------------------------------------------------- */
+::selection {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
 
-.site-shell {
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #08080a;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #27272a #08080a;
+}
+
+/* Links */
+a {
+  color: inherit;
+  text-decoration: none;
+  transition: color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+/* Container */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--container-px);
+  width: 100%;
+}
+
+/* ═══════════════════════════════
+   ANIMATIONS & MOTION SYSTEM
+   ═══════════════════════════════ */
+
+@keyframes ping {
+  75%, 100% { opacity: 0; transform: scale(2); }
+}
+
+@keyframes vg-caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+@keyframes vg-install-glow-breathe {
+  0%, 100% { box-shadow: 0 0 20px rgba(255,255,255,0.12), 0 0 40px rgba(255,255,255,0.04); }
+  50%       { box-shadow: 0 0 28px rgba(255,255,255,0.25), 0 0 55px rgba(255,255,255,0.08); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { text-shadow: 0 0 20px rgba(255,255,255,0.4), 0 0 40px rgba(255,255,255,0.2); }
+  50%      { text-shadow: 0 0 30px rgba(255,255,255,0.7), 0 0 60px rgba(255,255,255,0.35); }
+}
+
+@keyframes shine {
+  0% { background-position: 200%; }
+  100% { background-position: -200%; }
+}
+
+/* ═══════════════════════════════
+   TYPOGRAPHY CLASSES
+   ═══════════════════════════════ */
+
+.vg-serif {
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+  font-feature-settings: "kern" 1, "liga" 1;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.06em;
+}
+
+.vg-hero-heading {
+  font-family: var(--font-space);
+  font-optical-sizing: auto;
+  font-feature-settings: "kern" 1, "liga" 1;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1.06;
+}
+
+.vg-text-glow {
+  text-shadow: 0 0 16px rgba(255,255,255,0.4);
+}
+
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ═══════════════════════════════
+   BUTTONS
+   ═══════════════════════════════ */
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 48px;
+  padding: 0 1.75rem;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: #000000;
+  font-weight: 800;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+  border: 2px solid #ffffff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 10px 25px -5px rgba(255, 255, 255, 0.25);
+  user-select: none;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-primary:hover {
+  background: #e4e4e7;
+  border-color: #e4e4e7;
+  transform: translateY(-1px);
+  box-shadow: 0 0 28px rgba(255, 255, 255, 0.35);
+}
+
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 48px;
+  padding: 0 1.75rem;
+  border-radius: 9999px;
+  background: rgba(24, 24, 27, 0.7);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-secondary:hover {
+  background: rgba(39, 39, 42, 0.9);
+  border-color: rgba(255, 255, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.btn-secondary:active {
+  transform: scale(0.98);
+}
+
+.vg-install-glow {
+  animation: 3s ease-in-out infinite vg-install-glow-breathe;
+}
+
+/* ═══════════════════════════════
+   CARDS & SURFACES
+   ═══════════════════════════════ */
+
+.bento-card {
+  position: relative;
+  background: rgba(17, 17, 21, 0.65);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  padding: 1.75rem;
+  overflow: hidden;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-}
-
-/* Terminal window title bar — sticky, like a real terminal session */
-.term-bar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: #000;
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.55rem 1.25rem;
-  font-size: 13px;
 }
 
-.term-bar .dots {
-  display: flex;
-  gap: 7px;
-  flex-shrink: 0;
-}
-.term-bar .dot {
-  width: 11px;
-  height: 11px;
-  display: inline-block;
-}
-.dot-green {
-  background: var(--green);
-}
-.dot-amber {
-  background: var(--amber);
-}
-.dot-off {
-  background: var(--faint);
-}
-
-.term-bar .title {
-  color: var(--dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.term-bar .title b {
-  color: var(--green);
-  font-weight: normal;
-}
-
-.term-nav {
-  display: flex;
-  gap: 1.1rem;
-  white-space: nowrap;
-}
-.term-nav a {
-  border-bottom: none;
-  color: var(--dim);
-  padding: 0;
-}
-.term-nav a:hover {
-  color: var(--green);
-}
-.term-nav a[aria-current="page"] {
-  color: var(--amber);
-}
-.term-nav a[aria-current="page"]::before {
-  content: "> ";
-  color: var(--amber);
-}
-.term-nav .path {
-  color: var(--faint);
-}
-
-/* Main area — a centered column, like a terminal window on a desktop.
-   Capped so content stays perfectly aligned instead of stretching to the
-   viewport edges. */
-.term-main {
-  flex: 1;
-  width: 100%;
-  max-width: 1160px;
-  margin-inline: auto;
-  padding: 2.5rem clamp(1rem, 3vw, 2.5rem) 4rem;
-}
-
-/* responsive tiled layouts — fill the page without stretching lines */
-.grid {
-  display: grid;
-  gap: 1.5rem;
-  align-items: start;
-}
-.grid-2 {
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-}
-.grid-3 {
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-}
-.span-all {
-  grid-column: 1 / -1;
-}
-
-/* Footer status line */
-.term-footer {
-  border-top: 1px solid var(--line);
-  padding: 0.7rem 1.25rem;
-  font-size: 13px;
-  color: var(--faint);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 2rem;
-}
-.term-footer .ok {
-  color: var(--green);
-}
-.term-footer a {
-  color: var(--dim);
-  border-bottom: none;
-}
-.term-footer a:hover {
-  color: var(--green);
-}
-
-/* --- terminal window chrome ------------------------------------------ */
-
-.win {
-  border: 1px solid var(--line);
-  background: #000;
-  margin: 0 0 2.5rem;
-  min-width: 0; /* let grid cells shrink below content width */
-}
-.win .win-bar {
-  border-bottom: 1px solid var(--line);
-  padding: 0.45rem 0.9rem;
-  font-size: 12px;
-  color: var(--faint);
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-.win .win-bar .win-title {
-  color: var(--dim);
-}
-.win .win-body {
-  padding: 1.1rem 1.1rem 1.3rem;
-  overflow-x: auto;
-}
-
-/* --- terminal primitives --------------------------------------------- */
-
-.prompt {
-  color: var(--amber);
-}
-.prompt .user {
-  color: var(--green);
-}
-.prompt .host {
-  color: var(--dim);
-}
-.prompt .path {
-  color: var(--dim);
-}
-
-.cursor {
-  display: inline-block;
-  width: 0.6em;
-  height: 1.05em;
-  background: var(--green);
-  vertical-align: text-bottom;
-  animation: blink 1.1s steps(1) infinite;
-}
-.cursor.amber {
-  background: var(--amber);
-}
-@keyframes blink {
-  0%, 55% { opacity: 1; }
-  56%, 100% { opacity: 0; }
-}
-
-.line {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.cmd {
-  color: var(--green);
-}
-.out {
-  color: var(--green);
-}
-.dim {
-  color: var(--dim);
-}
-.faint {
-  color: var(--faint);
-}
-.amber {
-  color: var(--amber);
-}
-
-/* --- terminal blocks (sections) -------------------------------------- */
-
-section.block {
-  margin: 0 0 3rem;
-}
-.block .block-head {
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 0.4rem;
-  margin-bottom: 1rem;
-  color: var(--amber);
-  font-size: 16px;
-}
-.block .block-head::before {
-  content: "## ";
-  color: var(--dim);
-}
-
-pre.out {
-  font-family: var(--mono);
-  white-space: pre;
-  overflow-x: auto;
-  padding: 0.4rem 0;
-}
-
-/* --- hero ------------------------------------------------------------- */
-
-.hero-tagline {
-  font-size: 17px;
-  margin: 1.1rem 0 2rem;
-  color: var(--dim);
-}
-.hero-tagline .hl {
-  color: var(--green);
-}
-.hero-tagline .hl-a {
-  color: var(--amber);
-}
-
-/* --- how-to steps ----------------------------------------------------- */
-
-.steps {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 1.5rem;
-  align-items: start;
-}
-.step .step-num {
-  color: var(--amber);
-}
-.step h3 {
-  display: inline;
-  font-weight: normal;
-  font-size: 15px;
-  color: var(--green);
-}
-
-/* --- command list ----------------------------------------------------- */
-
-.cmdlist {
-  list-style: none;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
-  gap: 0 2rem;
-}
-.cmdlist li {
-  padding: 0.15rem 0;
-}
-.cmdlist .cmd-name {
-  color: var(--amber);
-}
-.cmdlist .cmd-desc {
-  color: var(--dim);
-}
-
-/* --- key-value lists (aligned columns) -------------------------------- */
-
-.kvlist {
-  list-style: none;
-}
-.kvlist li {
-  display: grid;
-  grid-template-columns: 8ch max-content 1fr;
-  column-gap: 0.6rem;
-  align-items: baseline;
-  padding: 0.2rem 0;
-}
-.kvlist .k {
-  color: var(--dim);
-}
-.kvlist .a {
-  color: var(--faint);
-}
-.kvlist li > :last-child {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.credit-name {
-  color: var(--amber);
-}
-
-/* --- features --------------------------------------------------------- */
-
-.features {
-  list-style: none;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
-  gap: 0.3rem 2rem;
-  align-items: start;
-}
-.features li {
-  padding: 0.3rem 0 0.3rem 2ch;
-  text-indent: -2ch;
-}
-.features li::before {
-  content: "> ";
-  color: var(--amber);
-}
-.features b {
-  font-weight: normal;
-  color: var(--green);
-}
-
-/* --- form (contact) --------------------------------------------------- */
-
-.term-form label {
-  display: block;
-  color: var(--dim);
-  margin: 0.8rem 0 0.3rem;
-}
-.term-form textarea,
-.term-form input {
-  width: 100%;
-  background: #000;
-  border: 1px solid var(--faint);
-  color: var(--green);
-  font-family: var(--mono);
-  font-size: 15px;
-  padding: 0.5rem 0.6rem;
-  resize: vertical;
-}
-.term-form textarea:focus,
-.term-form input:focus {
-  outline: 1px dashed var(--amber);
-  border-color: var(--amber);
-}
-.term-form .hint {
-  font-size: 13px;
-  color: var(--faint);
-  margin-top: 0.3rem;
-}
-
-button.btn {
-  background: transparent;
-  border: 1px solid var(--green);
-  color: var(--green);
-  font-family: var(--mono);
-  font-size: 15px;
-  padding: 0.55rem 1.1rem;
-  margin-top: 1rem;
-  cursor: pointer;
-}
-button.btn:hover {
-  background: var(--green);
-  color: #000;
-}
-button.btn:focus-visible {
-  outline: 1px dashed var(--amber);
-}
-
-/* --- misc ------------------------------------------------------------- */
-
-.mt {
-  margin-top: 1.2rem;
-}
-.mb {
-  margin-bottom: 1.2rem;
-}
-.hr {
-  border: none;
-  border-top: 1px solid var(--line);
-  margin: 1.6rem 0;
-}
-kbd {
-  border: 1px solid var(--faint);
-  padding: 0 0.35em;
-  color: var(--amber);
+.bento-card:hover {
+  border-color: var(--border-hover);
+  background: rgba(255, 255, 255, 0.04);
+  transform: translateY(-2px);
 }
 
 @media (max-width: 640px) {
-  .term-bar .title span.status {
-    display: none;
-  }
-  body {
-    font-size: 14px;
+  .bento-card {
+    padding: 1.25rem;
+    border-radius: 1rem;
   }
 }
 
-/* Narrow viewports: shrink terminal output so ASCII blocks and trees fit
-   inside their windows instead of being clipped off the right edge. */
-@media (max-width: 700px) {
-  .win-body pre {
-    font-size: 11px;
+.shine-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 20%, rgba(255,255,255,0.06) 36%, rgba(255,255,255,0.03) 50%, transparent 64%);
+  background-size: 200% 100%;
+  background-position: 200% 0;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.bento-card:hover .shine-layer {
+  opacity: 1;
+  animation: 3s ease-in-out infinite shine;
+}
+
+/* ═══════════════════════════════
+   TERMINAL MOCKUP
+   ═══════════════════════════════ */
+
+.terminal-mock {
+  position: relative;
+  background: rgba(14, 14, 18, 0.95);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  overflow: hidden;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(20, 20, 26, 0.6);
+  gap: 0.75rem;
+}
+
+.traffic-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.traffic-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.traffic-red { background: #ff5f56; }
+.traffic-yellow { background: #ffbd2e; }
+.traffic-green { background: #27c93f; }
+
+.terminal-tabs {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.terminal-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.terminal-body {
+  padding: 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.7;
+  min-height: 240px;
+  color: #d4d4d8;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  .terminal-title {
+    display: none;
   }
+  .terminal-body {
+    padding: 1rem;
+    font-size: 0.75rem;
+    min-height: 220px;
+  }
+}
+
+/* ═══════════════════════════════
+   TERMINAL WINDOW & TYPEWRITER HELPERS
+   ═══════════════════════════════ */
+
+.win {
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+  background: rgba(14, 14, 18, 0.95);
+  overflow: hidden;
+}
+.win-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(20, 20, 26, 0.6);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.win-title {
+  color: #a1a1aa;
+  font-weight: 600;
+}
+.win-body {
+  padding: 1.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+.dots {
+  display: flex;
+  gap: 6px;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.dot-green { background: #27c93f; }
+.dot-amber { background: #ffbd2e; }
+.dot-off   { background: #52525b; }
+.faint     { color: #71717a; }
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+.prompt { color: #a1a1aa; }
+.user { color: #ffffff; font-weight: 700; }
+.host { color: #71717a; }
+.path { color: #a1a1aa; }
+.cmd { color: #ffffff; font-weight: 600; }
+.cursor {
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  background: #ffffff;
+  animation: vg-caret-blink 1s infinite;
+}
+
+/* ═══════════════════════════════
+   RESPONSIVE GRID SYSTEM
+   ═══════════════════════════════ */
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+}
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+}
+
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .grid-4, .grid-3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .grid-2 {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .grid-4, .grid-3, .grid-2 {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+/* ═══════════════════════════════
+   HOVER & UTILITY CLASSES
+   ═══════════════════════════════ */
+
+.hover-text-white:hover {
+  color: #ffffff !important;
+}
+
+.hover-border-white:hover {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
 }

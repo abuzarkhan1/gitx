@@ -1,70 +1,62 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import "./globals.css";
+import type { Metadata } from 'next';
+import { Navbar } from '@/components/Navbar';
+import { Footer } from '@/components/Footer';
+import { ScrollControls } from '@/components/ScrollControls';
+import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: "GitX — terminal-native Git intelligence",
-    template: "%s — GitX",
+    default: 'GitX — Terminal-Native Git Repository Intelligence & Code Archaeology',
+    template: '%s — GitX',
   },
   description:
-    "GitX turns a Git repository's history, structure, changes, ownership, branches, dependencies, and recoverable work into a fast, interactive, explainable terminal experience. No network. No accounts. No AI.",
-  metadataBase: new URL("https://github.com/abuzarkhan1/gitx"),
+    'High-performance, local-first repository intelligence and code archaeology in pure Rust. SQLite FTS5 search, 6-score health metrics, rename-tracking lineage, and 60 FPS Ratatui TUI dashboard. 100% offline, zero telemetry.',
+  keywords: [
+    'gitx',
+    'git archaeology',
+    'rust git tool',
+    'terminal ui',
+    'ratatui',
+    'git health score',
+    'sqlite fts5',
+    'repository intelligence',
+    'code hotspots',
+    'local-first',
+  ],
+  authors: [{ name: 'Abuzar Khan', url: 'https://github.com/abuzarkhan1' }],
+  metadataBase: new URL('https://gitx.sh'),
   openGraph: {
-    title: "GitX — terminal-native Git intelligence",
+    title: 'GitX — Terminal-Native Git Repository Intelligence',
     description:
-      "Local-first, terminal-native Git repository intelligence and code archaeology.",
-    type: "website",
+      'Pure Rust, local-first Git repository intelligence, continuous rename lineage, deterministic health scoring, and 60 FPS terminal dashboard.',
+    type: 'website',
+    url: 'https://gitx.sh',
+    siteName: 'GitX',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'GitX — Terminal-Native Git Repository Intelligence',
+    description:
+      'Pure Rust, local-first Git repository intelligence, continuous rename lineage, deterministic health scoring, and 60 FPS terminal dashboard.',
   },
 };
-
-const NAV = [
-  { href: "/", label: "~/", title: "home" },
-  { href: "/about", label: "~/about", title: "about" },
-  { href: "/contact", label: "~/contact", title: "contact" },
-];
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <body>
-        <div className="site-shell">
-          <header className="term-bar">
-            <span className="dots" aria-hidden="true">
-              <span className="dot dot-green" />
-              <span className="dot dot-amber" />
-              <span className="dot dot-off" />
-            </span>
-            <span className="title">
-              <b>gitx</b>
-              <span className="status"> — zsh — 88×24</span>
-            </span>
-            <nav className="term-nav" aria-label="Sections">
-              {NAV.map((item) => (
-                <Link key={item.href} href={item.href} title={item.title}>
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
-          </header>
-
-          <main className="term-main">{children}</main>
-
-          <footer className="term-footer">
-            <span>
-              <span className="ok">$</span> gitx --version
-              <span className="faint"> → </span>
-              <span className="ok">GitX 0.1.0</span>
-            </span>
-            <span>
-              <span className="ok">$</span> git status
-              <span className="faint"> → </span>
-              <span className="ok">on main · clean</span>
-            </span>
-          </footer>
-        </div>
+    <html lang="en" className="dark">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      </head>
+      <body style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#08080a', color: '#ffffff' }}>
+        <Navbar />
+        <main id="main-content" style={{ flex: 1, outline: 'none' }}>
+          {children}
+        </main>
+        <Footer />
+        <ScrollControls />
       </body>
     </html>
   );
