@@ -2,7 +2,6 @@ import React from 'react';
 import Link from 'next/link';
 import { StarsCanvas } from '@/components/StarsCanvas';
 import { InstallCmd } from '@/components/InstallCmd';
-import { TerminalMockup } from '@/components/TerminalMockup';
 import { DownloadHub } from '@/components/DownloadHub';
 import { FaqAccordion } from '@/components/FaqAccordion';
 import {
@@ -52,14 +51,6 @@ const ARCHITECTURE_PILLARS = [
   },
 ];
 
-const REAL_BENCHMARKS = [
-  { name: 'GitX Cached Health Query', time: '< 1ms', pct: 4, note: 'Instant memory-mapped SQLite index' },
-  { name: 'GitX SQLite FTS5 Search (500 commits)', time: '412 µs', pct: 8, note: 'BM25 inverted full-text lookup' },
-  { name: 'GitX Incremental Refresh (+1 commit)', time: '40ms', pct: 24, note: 'Parallel delta packfile update' },
-  { name: 'Standard git log linear walk', time: '1,840ms', pct: 72, note: 'Linear process-spawning traversal' },
-  { name: 'Electron GUI Clients (Cold Scan)', time: '8,400ms', pct: 100, note: 'Heavy DOM and multi-process overhead' },
-];
-
 export default function HomePage() {
   return (
     <div style={{ position: 'relative', width: '100%', overflowX: 'hidden' }}>
@@ -78,44 +69,13 @@ export default function HomePage() {
         }}
       >
         <div className="container" style={{ maxWidth: '960px' }}>
-          {/* Status Badge */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1.75rem' }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.65rem',
-                borderRadius: '9999px',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
-                background: 'rgba(255, 255, 255, 0.03)',
-                padding: '0.4rem 1rem',
-                fontSize: '0.75rem',
-                fontFamily: 'var(--font-mono)',
-                color: '#d4d4d8',
-                backdropFilter: 'blur(12px)',
-                lineHeight: 1.4,
-              }}
-            >
-              <span
-                style={{
-                  width: '7px',
-                  height: '7px',
-                  borderRadius: '50%',
-                  background: '#ffffff',
-                  boxShadow: '0 0 10px #ffffff',
-                }}
-              />
-              <span>⚡ v0.1.0 Released · 11 Modular Rust Crates · 100% Offline</span>
-            </div>
-          </div>
-
           {/* Dominant Hero Headline */}
           <h1
             className="vg-hero-heading"
             style={{
               fontSize: 'clamp(2.5rem, 6.2vw, 4.8rem)',
               color: '#ffffff',
-              marginBottom: '1.5rem',
+              marginBottom: '2rem',
               letterSpacing: '-0.04em',
             }}
           >
@@ -124,20 +84,6 @@ export default function HomePage() {
               Repository Intelligence
             </em>
           </h1>
-
-          {/* Subtitle */}
-          <p
-            style={{
-              fontSize: 'clamp(1rem, 2vw, 1.25rem)',
-              color: '#a1a1aa',
-              lineHeight: 1.65,
-              maxWidth: '780px',
-              margin: '0 auto 2.5rem',
-            }}
-          >
-            Stop wrestling with fragmented <code style={{ color: '#ffffff', background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>git log</code>,
-            broken blame trails, and untraceable refactors. GitX indexes your entire repository history into an ultra-fast local SQLite engine for sub-millisecond archaeology, 6-score health metrics, and interactive terminal exploration.
-          </p>
 
           {/* Primary Action Button Cluster */}
           <div
@@ -151,7 +97,7 @@ export default function HomePage() {
             }}
           >
             <a href="#download" className="btn-primary">
-              Download GitX Free →
+              Get GitX on GitHub →
             </a>
             <a href="#architecture" className="btn-secondary">
               Explore 11 Crates
@@ -159,123 +105,8 @@ export default function HomePage() {
           </div>
 
           {/* One-Line Install Chip */}
-          <div style={{ maxWidth: '540px', margin: '0 auto 2.5rem' }}>
-            <InstallCmd cmd="curl -fsSL https://gitx.sh/install.sh | sh" label="Quick Install" />
-          </div>
-
-          {/* Trust Invariant Triad */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '1.5rem',
-              flexWrap: 'wrap',
-              fontSize: '0.78rem',
-              fontFamily: 'var(--font-mono)',
-              color: '#71717a',
-            }}
-          >
-            <span>⚡ 11 Native Rust Crates</span>
-            <span>·</span>
-            <span>🔍 Sub-Millisecond SQLite FTS5</span>
-            <span>·</span>
-            <span>🔒 100% Offline &amp; Air-Gapped</span>
-            <span>·</span>
-            <span>🖥️ 60 FPS Ratatui TUI</span>
-          </div>
-        </div>
-      </section>
-
-      {/* ═══════════════════════════════
-          INTERACTIVE TERMINAL SHOWCASE
-          ═══════════════════════════════ */}
-      <section style={{ padding: '0 1.5rem 5rem' }}>
-        <div className="container" style={{ maxWidth: '960px' }}>
-          <TerminalMockup />
-        </div>
-      </section>
-
-      {/* ═══════════════════════════════
-          PERFORMANCE BENCHMARKS
-          ═══════════════════════════════ */}
-      <section
-        id="benchmarks"
-        style={{
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          padding: 'var(--section-py-lg) 1.5rem',
-        }}
-      >
-        <div className="container" style={{ maxWidth: '960px' }}>
-          <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
-            <div className="section-label">
-              <span>⚡ CRITERION BENCHMARKS</span>
-            </div>
-            <h2
-              style={{
-                fontSize: 'clamp(2rem, 4vw, 3rem)',
-                fontWeight: 800,
-                color: '#ffffff',
-                letterSpacing: '-0.04em',
-                marginBottom: '1rem',
-              }}
-            >
-              Engineered for velocity.{' '}
-              <em className="vg-serif" style={{ color: '#ffffff', fontWeight: 400 }}>
-                Sub-millisecond latency.
-              </em>
-            </h2>
-            <p style={{ color: '#a1a1aa', fontSize: '1rem', maxWidth: '650px', margin: '0 auto' }}>
-              Micro-benchmarks conducted across real-world repositories validate microsecond query retrieval and fast parallel packfile updates.
-            </p>
-          </div>
-
-          <div className="bento-card" style={{ padding: '2.25rem' }}>
-            <div className="shine-layer" />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              {REAL_BENCHMARKS.map((b, i) => (
-                <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
-                    <span style={{ fontWeight: 700, color: b.pct < 30 ? '#ffffff' : '#d4d4d8' }}>
-                      {b.name}
-                    </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontFamily: 'var(--font-mono)' }}>
-                      <span style={{ color: '#71717a', fontSize: '0.75rem' }}>{b.note}</span>
-                      <span style={{ color: '#ffffff', fontWeight: 800, fontSize: '0.9rem' }}>{b.time}</span>
-                    </div>
-                  </div>
-                  <div style={{ height: '8px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        width: `${b.pct}%`,
-                        height: '100%',
-                        background: b.pct < 30 ? '#ffffff' : 'rgba(255, 255, 255, 0.25)',
-                        borderRadius: '4px',
-                        transition: 'width 0.5s ease',
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div
-              style={{
-                marginTop: '1.75rem',
-                paddingTop: '1.25rem',
-                borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '0.75rem',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.75rem',
-                color: '#71717a',
-              }}
-            >
-              <span>Benchmarked with Criterion.rs &amp; real Git trees</span>
-              <span style={{ color: '#ffffff' }}>Zero network latency · Local disk I/O</span>
-            </div>
+          <div style={{ maxWidth: '640px', margin: '0 auto' }}>
+            <InstallCmd cmd="git clone https://github.com/abuzarkhan1/gitx.git && cd gitx && cargo build --release" label="Build from Source" />
           </div>
         </div>
       </section>
@@ -292,9 +123,6 @@ export default function HomePage() {
       >
         <div className="container" style={{ maxWidth: '1000px' }}>
           <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-            <div className="section-label">
-              <span>🏛️ 11-CRATE SYSTEMS ARCHITECTURE</span>
-            </div>
             <h2
               style={{
                 fontSize: 'clamp(2rem, 4vw, 3rem)',
@@ -309,9 +137,6 @@ export default function HomePage() {
                 Every layer explainable.
               </em>
             </h2>
-            <p style={{ color: '#a1a1aa', fontSize: '1rem', maxWidth: '650px', margin: '0 auto' }}>
-              Built as a clean modular pipeline from the low-level object database parser up to the high-performance Ratatui terminal dashboard.
-            </p>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
@@ -404,9 +229,6 @@ export default function HomePage() {
       >
         <div className="container">
           <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-            <div className="section-label">
-              <span>🚀 DEEP REPOSITORY CAPABILITIES</span>
-            </div>
             <h2
               style={{
                 fontSize: 'clamp(2rem, 4vw, 3rem)',
@@ -421,9 +243,6 @@ export default function HomePage() {
                 100% open intelligence.
               </em>
             </h2>
-            <p style={{ color: '#a1a1aa', fontSize: '1rem', maxWidth: '650px', margin: '0 auto' }}>
-              Everything your team needs to inspect legacy code, audit maintenance risk, and explore Git history at terminal velocity.
-            </p>
           </div>
 
           <div className="grid-3">
@@ -431,7 +250,6 @@ export default function HomePage() {
             <div className="bento-card" style={{ minHeight: '340px' }}>
               <div className="shine-layer" />
               <div>
-                <span className="section-label">01 / ARCHITECTURE</span>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
                   11 Modular Rust Crates
                 </h3>
@@ -446,7 +264,6 @@ export default function HomePage() {
             <div className="bento-card" style={{ minHeight: '340px' }}>
               <div className="shine-layer" />
               <div>
-                <span className="section-label">02 / ARCHAEOLOGY</span>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
                   File Lineage &amp; Renames
                 </h3>
@@ -461,7 +278,6 @@ export default function HomePage() {
             <div className="bento-card" style={{ minHeight: '340px' }}>
               <div className="shine-layer" />
               <div>
-                <span className="section-label">03 / METRICS</span>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
                   Deterministic 6-Score Health
                 </h3>
@@ -476,7 +292,6 @@ export default function HomePage() {
             <div className="bento-card" style={{ minHeight: '340px' }}>
               <div className="shine-layer" />
               <div>
-                <span className="section-label">04 / SEARCH</span>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
                   SQLite FTS5 BM25 Search
                 </h3>
@@ -491,7 +306,6 @@ export default function HomePage() {
             <div className="bento-card" style={{ minHeight: '340px' }}>
               <div className="shine-layer" />
               <div>
-                <span className="section-label">05 / RECOVERY</span>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
                   Reflog &amp; Dangling Objects
                 </h3>
@@ -506,7 +320,6 @@ export default function HomePage() {
             <div className="bento-card" style={{ minHeight: '340px' }}>
               <div className="shine-layer" />
               <div>
-                <span className="section-label">06 / PRIVACY</span>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
                   100% Offline &amp; Private
                 </h3>
@@ -531,16 +344,13 @@ export default function HomePage() {
         }}
       >
         <div className="container" style={{ maxWidth: '800px', textAlign: 'center' }}>
-          <div className="section-label">
-            <span>💻 COMMAND-LINE WORKFLOW</span>
-          </div>
           <h2
             style={{
               fontSize: 'clamp(2rem, 4vw, 3rem)',
               fontWeight: 800,
               color: '#ffffff',
               letterSpacing: '-0.04em',
-              marginBottom: '1rem',
+              marginBottom: '2.5rem',
             }}
           >
             One binary.{' '}
@@ -548,9 +358,6 @@ export default function HomePage() {
               Unlimited insights.
             </em>
           </h2>
-          <p style={{ color: '#a1a1aa', fontSize: '1rem', maxWidth: '600px', margin: '0 auto 2.5rem' }}>
-            Integrates into any terminal, script, or CI pipeline with human-friendly colored output or machine-readable JSON.
-          </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', textAlign: 'left' }}>
             <InstallCmd cmd="gitx scan" label="Build local SQLite index" />
@@ -603,9 +410,6 @@ export default function HomePage() {
       >
         <div className="container" style={{ maxWidth: '960px' }}>
           <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
-            <div className="section-label">
-              <span>📦 FREE &amp; OPEN SOURCE</span>
-            </div>
             <h2
               style={{
                 fontSize: 'clamp(2rem, 4vw, 3rem)',
@@ -641,9 +445,6 @@ export default function HomePage() {
       >
         <div className="container" style={{ maxWidth: '800px' }}>
           <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
-            <div className="section-label">
-              <span>❓ FREQUENTLY ASKED QUESTIONS</span>
-            </div>
             <h2
               style={{
                 fontSize: 'clamp(2rem, 4vw, 3rem)',

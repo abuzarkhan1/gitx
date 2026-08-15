@@ -22,7 +22,6 @@ export default function ContactPage() {
       <div className="container" style={{ maxWidth: '960px' }}>
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-          <span className="section-label">Community &amp; Support</span>
           <h1 className="vg-hero-heading" style={{ fontSize: 'clamp(2.25rem, 5vw, 3.5rem)', color: '#ffffff', marginBottom: '1.25rem' }}>
             Get in <span className="vg-serif" style={{ color: '#ffffff', fontWeight: 400 }}>Touch</span>
           </h1>

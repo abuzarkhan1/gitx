@@ -20,7 +20,6 @@ export default function AboutPage() {
       <div className="container" style={{ maxWidth: '860px' }}>
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-          <span className="section-label">Architecture &amp; Core Vision</span>
           <h1 className="vg-hero-heading" style={{ fontSize: 'clamp(2.25rem, 5vw, 3.5rem)', color: '#ffffff', marginBottom: '1.25rem' }}>
             Engineered for <span className="vg-serif" style={{ color: '#ffffff', fontWeight: 400 }}>Deep Git Intelligence</span>
           </h1>

@@ -29,8 +29,8 @@ const FAQS: FaqItem[] = [
     a: 'GitX scans the local object database and reflogs for dangling, detached, or orphaned commit objects created before botched rebases or resets. You can inspect unreachable commits and export unified patches with `gitx recovery export <oid>`.',
   },
   {
-    q: 'Which platforms and package managers are supported?',
-    a: 'macOS (Apple Silicon M1-M4 & Intel x86_64), Linux (Debian, Ubuntu, Fedora, Arch), and Windows x64. You can install via `cargo install gitx-cli`, `brew install abuzarkhan1/tap/gitx`, or the official one-line curl installer.',
+    q: 'Which platforms and installation methods are supported?',
+    a: 'GitX compiles natively on macOS (Apple Silicon & Intel), Linux, and Windows via standard Rust tooling. You can build from source using `git clone https://github.com/abuzarkhan1/gitx.git && cd gitx && cargo build --release` or install directly via `cargo install --git https://github.com/abuzarkhan1/gitx.git gitx-cli`. Source code and release tags are hosted openly on GitHub.',
   },
 ];
 

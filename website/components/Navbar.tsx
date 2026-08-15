@@ -8,7 +8,6 @@ const NAV_LINKS = [
   { label: 'Architecture', href: '/#architecture' },
   { label: 'Features', href: '/#features' },
   { label: 'CLI', href: '/#cli' },
-  { label: 'Benchmarks', href: '/#benchmarks' },
   { label: 'Download', href: '/#download' },
   { label: 'About', href: '/about' },
   { label: 'Contact', href: '/contact' },
@@ -26,7 +25,6 @@ function GitHubIcon({ size = 16 }: { size?: number }) {
 export function Navbar() {
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
-  const [bannerVisible, setBannerVisible] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -85,58 +83,6 @@ export function Navbar() {
           borderBottom: scrolled ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid transparent',
         }}
       >
-        {/* Integrated Announcement Banner */}
-        {bannerVisible && (
-          <div
-            style={{
-              background: 'linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-              padding: '0.45rem 1.5rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.75rem',
-              fontSize: '0.78rem',
-              fontFamily: 'var(--font-mono)',
-              color: '#d4d4d8',
-              position: 'relative',
-            }}
-          >
-            <span style={{ color: '#ffffff', fontWeight: 700 }}>⚡ GitX v0.1.0 Released:</span>
-            <span>11 native Rust crates &amp; local SQLite FTS5 archaeology.</span>
-            <Link
-              href="/#download"
-              style={{
-                color: '#ffffff',
-                textDecoration: 'underline',
-                fontWeight: 700,
-                marginLeft: '0.25rem',
-              }}
-            >
-              Get Started →
-            </Link>
-            <button
-              onClick={() => setBannerVisible(false)}
-              aria-label="Dismiss banner"
-              style={{
-                position: 'absolute',
-                right: '1rem',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                background: 'transparent',
-                border: 'none',
-                color: '#71717a',
-                cursor: 'pointer',
-                fontSize: '0.85rem',
-                padding: '0.25rem',
-                lineHeight: 1,
-              }}
-            >
-              ✕
-            </button>
-          </div>
-        )}
-
         {/* Main Navbar Bar */}
         <div
           style={{

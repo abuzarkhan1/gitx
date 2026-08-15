@@ -88,28 +88,10 @@ export function Footer() {
             borderTop: '1px solid rgba(255, 255, 255, 0.08)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#a1a1aa' }}>
-              © 2026 Abuzar Khan · GitX MIT License
+              © 2026 Abuzar Khan
             </div>
-            <a href="/#architecture" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#71717a' }} className="hover-text-white">
-              Architecture
-            </a>
-            <a href="/#features" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#71717a' }} className="hover-text-white">
-              Features
-            </a>
-            <a href="/#cli" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#71717a' }} className="hover-text-white">
-              CLI
-            </a>
-            <a href="/#download" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#71717a' }} className="hover-text-white">
-              Download
-            </a>
-            <Link href="/about" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#71717a' }} className="hover-text-white">
-              About
-            </Link>
-            <Link href="/contact" style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#71717a' }} className="hover-text-white">
-              Contact
-            </Link>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>

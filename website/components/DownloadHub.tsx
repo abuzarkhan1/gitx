@@ -4,107 +4,100 @@ import React from 'react';
 import { InstallCmd } from './InstallCmd';
 
 const INSTALL_OPTIONS = [
-  { id: 'curl', label: 'One-Line Curl', cmd: 'curl -fsSL https://gitx.sh/install.sh | sh', desc: 'Detects OS and CPU arch automatically' },
-  { id: 'cargo', label: 'Cargo (crates.io)', cmd: 'cargo install gitx-cli --locked', desc: 'Builds from crates.io with locked dependencies' },
-  { id: 'brew', label: 'Homebrew (macOS / Linux)', cmd: 'brew install abuzarkhan1/tap/gitx', desc: 'Native formula for macOS & Linuxbrew' },
-  { id: 'git', label: 'Build from Source (Git)', cmd: 'git clone https://github.com/abuzarkhan1/gitx.git && cd gitx && cargo build --release', desc: 'Compile the 11 crates locally with optimizations' },
+  {
+    id: 'git-build',
+    label: 'Build from Source (Recommended)',
+    cmd: 'git clone https://github.com/abuzarkhan1/gitx.git && cd gitx && cargo build --release',
+    desc: 'Compiles all 11 workspace crates locally with release optimizations',
+  },
+  {
+    id: 'cargo-git',
+    label: 'Install via Cargo (Git)',
+    cmd: 'cargo install --git https://github.com/abuzarkhan1/gitx.git gitx-cli',
+    desc: 'Directly builds and installs the gitx binary to $HOME/.cargo/bin',
+  },
+  {
+    id: 'cargo-tui',
+    label: 'Launch Interactive TUI',
+    cmd: 'cargo run --release -p gitx-tui',
+    desc: 'Spins up the 60 FPS Ratatui dashboard directly from repository root',
+  },
 ];
 
 export function DownloadHub() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      {/* Platform Binary Cards */}
+      {/* Platform & Build Overview Cards */}
       <div className="grid-2">
-        {/* macOS Card */}
+        {/* macOS & Linux Card */}
         <div className="bento-card" style={{ padding: '2.25rem' }}>
           <div className="shine-layer" />
           <div style={{ marginBottom: '1.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-              <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ffffff' }}>macOS</h3>
+              <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ffffff' }}>macOS &amp; Linux</h3>
               <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.08)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                Universal Binary
+                Native Rust
               </span>
             </div>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: '#a1a1aa' }}>
-              Apple Silicon (M1/M2/M3/M4) &amp; Intel x86_64
+              Apple Silicon (ARM64), Intel (x86_64), and Linux distributions. Compiles with standard Cargo toolchain.
             </p>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <a
-              href="https://github.com/abuzarkhan1/gitx/releases/latest"
+              href="https://github.com/abuzarkhan1/gitx"
               target="_blank"
               rel="noreferrer"
               className="btn-primary"
-              style={{ width: '100%' }}
+              style={{ width: '100%', textAlign: 'center' }}
             >
-              Download for Apple Silicon (ARM64)
-            </a>
-            <a
-              href="https://github.com/abuzarkhan1/gitx/releases/latest"
-              target="_blank"
-              rel="noreferrer"
-              className="btn-secondary"
-              style={{ width: '100%' }}
-            >
-              Download for Intel (x86_64)
+              View Repository on GitHub →
             </a>
           </div>
         </div>
 
-        {/* Linux & Windows Card */}
+        {/* Windows & Cross-Platform Card */}
         <div className="bento-card" style={{ padding: '2.25rem' }}>
           <div className="shine-layer" />
           <div style={{ marginBottom: '1.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-              <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ffffff' }}>Linux &amp; Windows</h3>
+              <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ffffff' }}>Windows &amp; Cross-Platform</h3>
               <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.08)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                Multi-Arch
+                MSVC / GNU
               </span>
             </div>
             <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: '#a1a1aa' }}>
-              Debian/Ubuntu .deb, Tarballs, and Windows x64 .exe
+              Full support for Windows Terminal, PowerShell, and CI/CD pipelines via native MSVC compilation.
             </p>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <a
-              href="https://github.com/abuzarkhan1/gitx/releases/latest"
-              target="_blank"
-              rel="noreferrer"
-              className="btn-primary"
-              style={{ width: '100%' }}
-            >
-              Download Linux (.deb / .tar.gz)
-            </a>
-            <a
-              href="https://github.com/abuzarkhan1/gitx/releases/latest"
+              href="https://github.com/abuzarkhan1/gitx/releases"
               target="_blank"
               rel="noreferrer"
               className="btn-secondary"
-              style={{ width: '100%' }}
+              style={{ width: '100%', textAlign: 'center' }}
             >
-              Download Windows (x64 .exe)
+              GitHub Releases &amp; Changelogs →
             </a>
           </div>
         </div>
       </div>
 
-      {/* Package Manager / Command-Line Installation Methods */}
+      {/* Build & Installation Commands */}
       <div className="bento-card" style={{ padding: '2rem' }}>
         <div className="shine-layer" />
         <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.25rem' }}>
-              Package Managers &amp; CLI Installation
+              Source &amp; Cargo Installation
             </h4>
-            <p style={{ fontSize: '0.85rem', color: '#a1a1aa' }}>
-              Install GitX directly in your terminal with your preferred package manager.
-            </p>
           </div>
 
           <a
-            href="https://github.com/abuzarkhan1/gitx/releases"
+            href="https://github.com/abuzarkhan1/gitx"
             target="_blank"
             rel="noreferrer"
             style={{
@@ -117,7 +110,7 @@ export function DownloadHub() {
               textDecoration: 'underline',
             }}
           >
-            All GitHub Releases →
+            GitHub Repository →
           </a>
         </div>
 
@@ -136,3 +129,5 @@ export function DownloadHub() {
     </div>
   );
 }
+
+export default DownloadHub;
