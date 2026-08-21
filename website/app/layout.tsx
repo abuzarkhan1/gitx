@@ -1,62 +1,64 @@
-import type { Metadata } from 'next';
-import { Navbar } from '@/components/Navbar';
-import { Footer } from '@/components/Footer';
-import { ScrollControls } from '@/components/ScrollControls';
-import './globals.css';
+import type { Metadata } from "next";
+import "./globals.css";
+import { CursorProvider } from "@/components/providers/CursorProvider";
+import { CustomCursor } from "@/components/motion/CustomCursor";
 
 export const metadata: Metadata = {
-  title: {
-    default: 'GitX — Terminal-Native Git Repository Intelligence & Code Archaeology',
-    template: '%s — GitX',
-  },
-  description:
-    'High-performance, local-first repository intelligence and code archaeology in pure Rust. SQLite FTS5 search, 6-score health metrics, rename-tracking lineage, and 60 FPS Ratatui TUI dashboard. 100% offline, zero telemetry.',
+  title: "GitX — Local-First Git Repository Intelligence & Code Archaeology",
+  description: "Terminal-native Git repository intelligence in Rust. Explore commit history, maintenance risk hotspots, ownership concentration, rename lineage, and recoverable work with sub-second SQLite indexing. 100% local, zero network, zero AI.",
   keywords: [
-    'gitx',
-    'git archaeology',
-    'rust git tool',
-    'terminal ui',
-    'ratatui',
-    'git health score',
-    'sqlite fts5',
-    'repository intelligence',
-    'code hotspots',
-    'local-first',
+    "GitX",
+    "Git CLI",
+    "Code Archaeology",
+    "Git Repository Intelligence",
+    "Rust CLI",
+    "Ratatui TUI",
+    "Git Hotspots",
+    "Git Reflog Recovery",
+    "Git Lineage",
+    "Local Git Analytics"
   ],
-  authors: [{ name: 'Abuzar Khan', url: 'https://github.com/abuzarkhan1' }],
-  metadataBase: new URL('https://gitx.sh'),
+  authors: [{ name: "GitX Contributors" }],
+  creator: "GitX Project",
+  metadataBase: new URL("https://gitx.dev"),
   openGraph: {
-    title: 'GitX — Terminal-Native Git Repository Intelligence',
-    description:
-      'Pure Rust, local-first Git repository intelligence, continuous rename lineage, deterministic health scoring, and 60 FPS terminal dashboard.',
-    type: 'website',
-    url: 'https://gitx.sh',
-    siteName: 'GitX',
+    title: "GitX — Local-First Git Repository Intelligence",
+    description: "Explainable Git history, maintenance hotspots, ownership, and lost work in an interactive terminal experience.",
+    url: "https://gitx.dev",
+    siteName: "GitX Observatory",
+    locale: "en_US",
+    type: "website",
   },
   twitter: {
-    card: 'summary_large_image',
-    title: 'GitX — Terminal-Native Git Repository Intelligence',
-    description:
-      'Pure Rust, local-first Git repository intelligence, continuous rename lineage, deterministic health scoring, and 60 FPS terminal dashboard.',
+    card: "summary_large_image",
+    title: "GitX — Terminal-Native Git Repository Intelligence",
+    description: "Explore Git history, hotspots, ownership, and recoverable work in Rust. 100% local, zero network, zero AI.",
+  },
+  robots: {
+    index: true,
+    follow: true,
   },
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{ children: React.ReactNode }>) {
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+        <meta name="theme-color" content="#ffffff" />
       </head>
-      <body style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#08080a', color: '#ffffff' }}>
-        <Navbar />
-        <main id="main-content" style={{ flex: 1, outline: 'none' }}>
+      <body className="antialiased selection:bg-[#ff682c] selection:text-white">
+        <a href="#main-content" className="skip-to-content">
+          Skip to main content
+        </a>
+        <CursorProvider>
+          <CustomCursor />
           {children}
-        </main>
-        <Footer />
-        <ScrollControls />
+        </CursorProvider>
       </body>
     </html>
   );

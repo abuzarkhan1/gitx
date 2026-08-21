@@ -1,131 +1,160 @@
-import type { Metadata } from 'next';
+"use client";
 
-export const metadata: Metadata = {
-  title: 'About GitX — Architecture & Vision',
-  description: 'Learn about the 11-crate Rust architecture, core design invariants, and the engineering behind GitX.',
-};
-
-function GitHubIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
-      <path d="M9 18c-4.51 2-5-2-7-2" />
-    </svg>
-  );
-}
+import React, { useState } from "react";
+import Link from "next/link";
+import { ArrowLeft, CheckCircle2, Copy, Check } from "lucide-react";
+import { GithubIcon } from "@/components/ui/GithubIcon";
+import { Navbar } from "@/components/ui/Navbar";
+import { Footer } from "@/components/ui/Footer";
+import { TextReveal } from "@/components/motion/TextReveal";
 
 export default function AboutPage() {
+  const [citationFormat, setCitationFormat] = useState<"bibtex" | "cargo" | "schema">("bibtex");
+  const [copiedCitation, setCopiedCitation] = useState(false);
+
+  const snippets = {
+    bibtex: `@software{gitx2026archaeology,
+  title={GitX: Local-First Terminal Repository Intelligence and Code Archaeology},
+  author={Abuzar Khan and GitX Contributors},
+  year={2026},
+  url={https://github.com/abuzarkhan1/gitx},
+}`,
+    cargo: `[dependencies]
+gitx-core = "0.1.0"
+gitx-analysis = "0.1.0"
+gitx-history = "0.1.0"
+gitx-storage = "0.1.0"`,
+    schema: `-- SQLite Cached Tables Schema (WAL Mode)
+CREATE TABLE commits (hash TEXT PRIMARY KEY, author TEXT, timestamp INTEGER, message TEXT);
+CREATE TABLE file_changes (commit_hash TEXT, file_path TEXT, additions INTEGER, deletions INTEGER);
+CREATE TABLE rename_lineage (source_path TEXT, target_path TEXT, similarity_pct INTEGER);
+CREATE TABLE recovery_dangling (hash TEXT PRIMARY KEY, discovered_at INTEGER, reason TEXT);`,
+  };
+
+  const handleCopyCitation = () => {
+    navigator.clipboard.writeText(snippets[citationFormat]);
+    setCopiedCitation(true);
+    setTimeout(() => setCopiedCitation(false), 2000);
+  };
+
   return (
-    <div style={{ background: '#08080a', minHeight: '100vh', paddingTop: '8.5rem', paddingBottom: '6rem', color: '#ffffff' }}>
-      <div className="container" style={{ maxWidth: '860px' }}>
-        {/* Header */}
-        <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-          <h1 className="vg-hero-heading" style={{ fontSize: 'clamp(2.25rem, 5vw, 3.5rem)', color: '#ffffff', marginBottom: '1.25rem' }}>
-            Engineered for <span className="vg-serif" style={{ color: '#ffffff', fontWeight: 400 }}>Deep Git Intelligence</span>
-          </h1>
-          <p style={{ color: '#a1a1aa', fontSize: '1.1rem', lineHeight: 1.6, maxWidth: '640px', margin: '0 auto' }}>
-            GitX turns a Git repository&apos;s history, structure, changes, ownership, branches, dependencies, and recoverable work into a fast, interactive, explainable terminal experience.
-          </p>
-        </div>
+    <div className="min-h-screen bg-[#ffffff] text-[#202020] flex flex-col">
+      <Navbar />
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          {/* Core Constraints Card */}
-          <div className="bento-card" style={{ padding: '2.25rem' }}>
-            <div className="shine-layer" />
-            <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#ffffff', marginBottom: '1.25rem' }}>
-              The 3 Architectural Invariants
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ padding: '1.1rem', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: '0.75rem' }}>
-                <div style={{ fontWeight: 800, color: '#ffffff', marginBottom: '0.25rem', fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>
-                  1. Zero Network Calls
-                </div>
-                <div style={{ color: '#a1a1aa', fontSize: '0.9rem', lineHeight: 1.6 }}>
-                  Everything runs directly against your local <code style={{ color: '#ffffff', background: 'rgba(255,255,255,0.08)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>.git</code> object database. Nothing is transmitted over the network.
-                </div>
+      <main id="main-content" className="flex-1 pt-32 pb-24">
+        <div className="section-container max-w-3xl space-y-12">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-xs font-mono text-[#828282] hover:text-[#202020] transition-colors"
+          >
+            <ArrowLeft size={13} />
+            <span>Observatory</span>
+          </Link>
+
+          <div className="space-y-3">
+            <TextReveal as="h1" className="font-heading text-4xl md:text-5xl text-[#202020] leading-tight tracking-[-0.02em]">
+              The 11-Crate Rust Architecture
+            </TextReveal>
+            <p className="text-base text-[#4d4d4d] leading-relaxed">
+              GitX is engineered as a clean 5-layer modular Rust workspace separating UI presentation, domain services, analytical algorithms, SQLite caching, and raw Git object storage.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 border-t border-[#e8e8e8] pt-8">
+            <div className="p-6 border border-[#e8e8e8]">
+              <div className="font-mono text-xs text-[#828282] mb-1">PRESENTATION LAYER</div>
+              <h3 className="font-heading text-lg text-[#202020] mb-2">gitx-cli &amp; gitx-tui</h3>
+              <p className="text-xs text-[#4d4d4d] leading-relaxed">
+                Ratatui 0.28 terminal UI with 60fps keyboard navigation, mouse support, ANSI color fidelity, and Clap 4.5 CLI parser.
+              </p>
+            </div>
+
+            <div className="p-6 border border-[#202020]">
+              <div className="font-mono text-xs text-[#ff682c] mb-1">DOMAIN &amp; ENGINE LAYER</div>
+              <h3 className="font-heading text-lg text-[#202020] mb-2">gitx-analysis &amp; gitx-history</h3>
+              <p className="text-xs text-[#4d4d4d] leading-relaxed">
+                Deterministic maintenance risk engine, rename-following lineage tracking, and Petgraph branch divergence analyzer.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h3 className="font-heading text-2xl text-[#202020] tracking-[-0.02em]">Core Invariants</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="p-4 border border-[#e8e8e8] space-y-1">
+                <div className="font-heading text-sm text-[#202020]">Zero AI / 100% Local</div>
+                <p className="text-xs text-[#4d4d4d]">Every metric exposes its mathematical formula and raw Git signals.</p>
               </div>
 
-              <div style={{ padding: '1.1rem', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: '0.75rem' }}>
-                <div style={{ fontWeight: 800, color: '#ffffff', marginBottom: '0.25rem', fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>
-                  2. Zero Accounts / Cloud Dependencies
-                </div>
-                <div style={{ color: '#a1a1aa', fontSize: '0.9rem', lineHeight: 1.6 }}>
-                  No signup, no telemetry, no tracking tokens. You own 100% of your data and indices.
-                </div>
+              <div className="p-4 border border-[#e8e8e8] space-y-1">
+                <div className="font-heading text-sm text-[#202020]">Sub-15ms SQLite Cache</div>
+                <p className="text-xs text-[#4d4d4d]">Incremental indexing with WAL mode eliminates repeated `git log` overhead.</p>
               </div>
 
-              <div style={{ padding: '1.1rem', background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: '0.75rem' }}>
-                <div style={{ fontWeight: 800, color: '#ffffff', marginBottom: '0.25rem', fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>
-                  3. 100% Deterministic Calculations
-                </div>
-                <div style={{ color: '#a1a1aa', fontSize: '0.9rem', lineHeight: 1.6 }}>
-                  Every score is a transparent, deterministic formula over raw git signals. Safe for automated CI/CD gating and compliance audits.
-                </div>
+              <div className="p-4 border border-[#e8e8e8] space-y-1">
+                <div className="font-heading text-sm text-[#202020]">Stable JSON Contracts</div>
+                <p className="text-xs text-[#4d4d4d]">Every major command emits machine-readable JSON for CI integration.</p>
               </div>
             </div>
           </div>
 
-          {/* 11 Crates Breakdown */}
-          <div className="bento-card" style={{ padding: '2.25rem' }}>
-            <div className="shine-layer" />
-            <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#ffffff', marginBottom: '1.25rem' }}>
-              11-Crate Clean Rust Architecture
-            </h2>
-            <pre
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.85rem',
-                color: '#d4d4d8',
-                background: 'rgba(0, 0, 0, 0.5)',
-                padding: '1.25rem',
-                borderRadius: '0.75rem',
-                border: '1px solid rgba(255, 255, 255, 0.06)',
-                lineHeight: 1.6,
-                overflowX: 'auto',
-              }}
-            >
-{`crates/
-├── gitx-cli/        commands · clap dispatch · exit codes
-├── gitx-core/       domain types · config · result types
-├── gitx-git/        objects · refs · diffs · reflog (gix wrapper)
-├── gitx-index/      initial + incremental scans · change detection
-├── gitx-storage/    SQLite provider · migrations · transactions
-├── gitx-history/    timeline · blame · lineage · renames
-├── gitx-analysis/   metrics · hotspots · ownership · 6-score health
-├── gitx-graph/      module graph · architecture dependencies
-├── gitx-search/     SQLite FTS5 full-text search · BM25
-├── gitx-services/   application facade (no business logic)
-└── gitx-tui/        Ratatui views · keymaps · charts · themes`}
-            </pre>
+          <div className="space-y-4 border-t border-[#e8e8e8] pt-8">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-xs text-[#828282] uppercase">
+                Technical Specifications &amp; Schema
+              </span>
+              <div className="flex items-center gap-1 bg-[#f5f5f5] p-1 border border-[#e8e8e8]">
+                {(["bibtex", "cargo", "schema"] as const).map((fmt) => (
+                  <button
+                    key={fmt}
+                    onClick={() => setCitationFormat(fmt)}
+                    className={`px-2.5 py-0.5 text-xs font-mono uppercase ${
+                      citationFormat === fmt ? "bg-[#202020] text-[#ffffff]" : "text-[#4d4d4d]"
+                    }`}
+                  >
+                    {fmt}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-[#202020] p-5 border border-[#333333] space-y-2">
+              <div className="flex justify-between items-center text-xs font-mono text-[#828282] pb-2 border-b border-[#333333]">
+                <span>FORMAT: {citationFormat.toUpperCase()}</span>
+                <button
+                  onClick={handleCopyCitation}
+                  className="flex items-center gap-1 text-[#ff682c] hover:text-[#ffffff]"
+                >
+                  {copiedCitation ? <Check size={12} /> : <Copy size={12} />}
+                  <span>{copiedCitation ? "Copied" : "Copy"}</span>
+                </button>
+              </div>
+              <pre className="font-mono text-xs text-[#ebe6dd] whitespace-pre-wrap leading-relaxed">
+                {snippets[citationFormat]}
+              </pre>
+            </div>
           </div>
 
-          {/* Creator Attribution Card */}
-          <div className="bento-card" style={{ padding: '2.25rem', display: 'flex', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem' }}>
-            <div className="shine-layer" />
+          <div className="p-6 border border-[#e8e8e8] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <div style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: '#a1a1aa', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.25rem', fontWeight: 700 }}>
-                Engineered By
-              </div>
-              <div style={{ fontSize: '1.4rem', fontWeight: 900, color: '#ffffff' }}>
-                Abuzar Khan
-              </div>
-              <div style={{ color: '#71717a', fontSize: '0.85rem' }}>
-                Creator &amp; Maintainer · MIT Licensed
-              </div>
+              <div className="font-heading text-base text-[#202020]">GitX Project</div>
+              <div className="text-xs text-[#828282]">Open Source Repository Intelligence</div>
             </div>
 
             <a
               href="https://github.com/abuzarkhan1/gitx"
               target="_blank"
-              rel="noopener noreferrer"
-              className="btn-secondary"
+              rel="noreferrer"
+              className="btn-primary text-xs"
             >
-              <GitHubIcon size={16} />
-              <span>GitHub Repository</span>
+              <GithubIcon size={13} className="mr-1.5" />
+              <span>GitHub</span>
             </a>
           </div>
         </div>
-      </div>
+      </main>
+
+      <Footer />
     </div>
   );
 }

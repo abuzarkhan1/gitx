@@ -1,469 +1,312 @@
-import React from 'react';
-import Link from 'next/link';
-import { StarsCanvas } from '@/components/StarsCanvas';
-import { InstallCmd } from '@/components/InstallCmd';
-import { DownloadHub } from '@/components/DownloadHub';
-import { FaqAccordion } from '@/components/FaqAccordion';
-import {
-  RustPulseRing,
-  LineageForensicsVisual,
-  HealthScorecardVisual,
-  SqliteFts5Visual,
-  DisasterRecoveryVisual,
-  AirGapPrivacyVisual,
-} from '@/components/CardVisuals';
+"use client";
 
-const ARCHITECTURE_PILLARS = [
-  {
-    num: '01',
-    title: 'Parallel Packfile Engine',
-    tag: 'Rust & Rayon',
-    desc: 'Bypasses slow shell-spawning wrappers by interfacing directly with raw Git object databases and packfiles via pure Rust and multithreaded Rayon pipelines.',
-    specs: ['Direct packfile reader', 'Zero shell spawns', 'Sub-15ms parsing for 1.5k commits'],
-  },
-  {
-    num: '02',
-    title: 'Local SQLite FTS5 Inverted Index',
-    tag: 'rusqlite & BM25',
-    desc: 'Maintains an incremental on-disk database with BM25 full-text search triggers, enabling sub-millisecond keyword lookup across all commit messages, diffs, authors, and symbols.',
-    specs: ['BM25 ranking algorithm', 'Sub-400µs query latency', 'Automatic schema migrations'],
-  },
-  {
-    num: '03',
-    title: 'Continuous File Lineage Forensics',
-    tag: 'DAG Traversal',
-    desc: 'Survives complex refactors, splits, and renames along the Git commit graph where standard git blame fails. Tracks code attribution across years with 100% confidence.',
-    specs: ['Full history rename tracking', 'Line-level introduction history', 'Mainline traversal'],
-  },
-  {
-    num: '04',
-    title: 'Deterministic 6-Score Health & Risk',
-    tag: 'Explainable Formulas',
-    desc: 'Quantifies repository maintainability across 6 distinct sub-dimensions: Code Hotspots, Single-Maintainer Ownership, Branch Hygiene, Change Volatility, Architecture Stability, and Recovery Risk.',
-    specs: ['0–100 weighted scale', 'Zero AI hallucinations', 'Deterministic JSON for CI/CD'],
-  },
-  {
-    num: '05',
-    title: '60 FPS Ratatui Terminal Interface',
-    tag: 'Crossterm & TUI',
-    desc: 'Full-screen, keyboard-driven terminal dashboard rendering 14 interactive diagnostic views with sub-frame response times, zero GPU bloat, and smooth navigation.',
-    specs: ['14 interactive views', 'Vim keybindings (j/k/tab)', '60 FPS terminal rendering'],
-  },
-];
+import React, { useState } from "react";
+import Link from "next/link";
+import { ArrowRight, Terminal, Copy, Check, Zap, Shield, History, Database, Flame, RotateCcw } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Navbar } from "@/components/ui/Navbar";
+import { Footer } from "@/components/ui/Footer";
+import { MarqueeStrip } from "@/components/ui/MarqueeStrip";
+import { FaqAccordion } from "@/components/ui/FaqAccordion";
+import { DeveloperHub } from "@/components/ui/DeveloperHub";
+import { GitxTerminalPlayground } from "@/components/gitx/GitxTerminalPlayground";
+import { HotspotsRiskMatrix } from "@/components/gitx/HotspotsRiskMatrix";
+import { LineageArchaeologyVisualizer } from "@/components/gitx/LineageArchaeologyVisualizer";
+import { RecoveryStudio } from "@/components/gitx/RecoveryStudio";
+import { BenchmarkObservatory } from "@/components/gitx/BenchmarkObservatory";
+import { TextReveal } from "@/components/motion/TextReveal";
+import { TactileButton } from "@/components/motion/TactileButton";
+import { PillarCard } from "@/components/motion/PillarCard";
+import { ObservatoryGridCanvas } from "@/components/motion/ObservatoryGridCanvas";
+import { useCursor } from "@/components/providers/CursorProvider";
 
 export default function HomePage() {
+  const [copiedInstall, setCopiedInstall] = useState(false);
+  const { setCursorVariant, resetCursor } = useCursor();
+
+  const installCmd = "curl -fsSL https://gitx.dev/install.sh | sh";
+
+  const handleCopyInstall = () => {
+    navigator.clipboard.writeText(installCmd);
+    setCopiedInstall(true);
+    setTimeout(() => setCopiedInstall(false), 2000);
+  };
+
   return (
-    <div style={{ position: 'relative', width: '100%', overflowX: 'hidden' }}>
-      {/* Background Starfield Canvas */}
-      <StarsCanvas />
+    <div className="min-h-screen bg-[#ffffff] text-[#202020] flex flex-col selection:bg-[#ff682c] selection:text-white">
+      <Navbar />
 
-      {/* ═══════════════════════════════
-          HERO SECTION
-          ═══════════════════════════════ */}
-      <section
-        style={{
-          position: 'relative',
-          paddingTop: '8.5rem',
-          paddingBottom: '4.5rem',
-          textAlign: 'center',
-        }}
-      >
-        <div className="container" style={{ maxWidth: '960px' }}>
-          {/* Dominant Hero Headline */}
-          <h1
-            className="vg-hero-heading"
-            style={{
-              fontSize: 'clamp(2.5rem, 6.2vw, 4.8rem)',
-              color: '#ffffff',
-              marginBottom: '2rem',
-              letterSpacing: '-0.04em',
-            }}
-          >
-            Terminal-Native Git Archaeology &amp;{' '}
-            <em className="vg-serif vg-text-glow" style={{ color: '#ffffff', fontWeight: 400 }}>
-              Repository Intelligence
-            </em>
-          </h1>
+      <main id="main-content" className="flex-1">
+        {/* =========================================================================
+            HERO OBSERVATORY — Full-Screen with Creative Reactive Grid
+            ========================================================================= */}
+        <section className="min-h-screen flex flex-col justify-center pt-28 pb-12 md:pt-32 md:pb-16 bg-[#ffffff] relative overflow-hidden">
+          {/* Subtle Creative Observatory Background Canvas */}
+          <ObservatoryGridCanvas />
 
-          {/* Primary Action Button Cluster */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '1rem',
-              flexWrap: 'wrap',
-              marginBottom: '2rem',
-            }}
-          >
-            <a href="#download" className="btn-primary">
-              Get GitX on GitHub →
-            </a>
-            <a href="#architecture" className="btn-secondary">
-              Explore 11 Crates
-            </a>
-          </div>
-
-          {/* One-Line Install Chip */}
-          <div style={{ maxWidth: '640px', margin: '0 auto' }}>
-            <InstallCmd cmd="git clone https://github.com/abuzarkhan1/gitx.git && cd gitx && cargo build --release" label="Build from Source" />
-          </div>
-        </div>
-      </section>
-
-      {/* ═══════════════════════════════
-          ARCHITECTURE (5 PILLARS)
-          ═══════════════════════════════ */}
-      <section
-        id="architecture"
-        style={{
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          padding: 'var(--section-py-lg) 1.5rem',
-        }}
-      >
-        <div className="container" style={{ maxWidth: '1000px' }}>
-          <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-            <h2
-              style={{
-                fontSize: 'clamp(2rem, 4vw, 3rem)',
-                fontWeight: 800,
-                color: '#ffffff',
-                letterSpacing: '-0.04em',
-                marginBottom: '1rem',
-              }}
-            >
-              Modular systems design.{' '}
-              <em className="vg-serif" style={{ color: '#ffffff', fontWeight: 400 }}>
-                Every layer explainable.
-              </em>
-            </h2>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
-            {ARCHITECTURE_PILLARS.map((pillar) => (
-              <div
-                key={pillar.num}
-                className="bento-card"
-                style={{ padding: '2.25rem' }}
+          <div className="section-container my-auto z-10">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
+              {/* Left Typographic Statement with Staggered Entry */}
+              <motion.div
+                initial={{ opacity: 0, x: -24 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.7, ease: [0.25, 1, 0.5, 1] }}
+                className="lg:col-span-6 space-y-6"
               >
-                <div className="shine-layer" />
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-                    <div
-                      style={{
-                        width: '48px',
-                        height: '48px',
-                        borderRadius: '50%',
-                        background: 'rgba(255, 255, 255, 0.06)',
-                        border: '1px solid rgba(255, 255, 255, 0.15)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#ffffff',
-                        fontFamily: 'var(--font-mono)',
-                        fontWeight: 900,
-                        fontSize: '1rem',
-                        flexShrink: 0,
-                      }}
+                <TextReveal
+                  as="h1"
+                  className="font-heading text-4xl sm:text-5xl lg:text-[60px] text-[#202020] tracking-[-0.03em] leading-[1.02]"
+                >
+                  Local-first Git archaeology.
+                </TextReveal>
+
+                <motion.p
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: 0.15, ease: "easeOut" }}
+                  className="text-lg md:text-xl text-[#4d4d4d] leading-relaxed max-w-xl font-sans font-normal"
+                >
+                  GitX turns commit history, code churn, ownership concentration, and lost reflogs into an instant, explainable terminal experience.
+                </motion.p>
+
+                {/* Primary CTA Cluster & Instant Install Pill */}
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: 0.25, ease: "easeOut" }}
+                  className="pt-2 space-y-3"
+                >
+                  <div className="flex flex-wrap items-center gap-3">
+                    <TactileButton
+                      href="#install"
+                      variant="primary"
+                      icon={<ArrowRight size={14} />}
                     >
-                      {pillar.num}
-                    </div>
-                    <div>
-                      <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#ffffff' }}>
-                        {pillar.title}
-                      </h3>
-                    </div>
+                      Install GitX
+                    </TactileButton>
+
+                    <TactileButton
+                      href="#tui"
+                      variant="ghost"
+                    >
+                      Interactive TUI
+                    </TactileButton>
+
+                    <a
+                      href="https://github.com/abuzarkhan1/gitx"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="link-orange text-sm font-sans font-medium ml-1"
+                    >
+                      GitHub Docs &rarr;
+                    </a>
                   </div>
-                  <span
-                    style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '0.75rem',
-                      background: 'rgba(255, 255, 255, 0.06)',
-                      padding: '0.25rem 0.75rem',
-                      borderRadius: '9999px',
-                      color: '#ffffff',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                    }}
+
+                  {/* 1-Click Terminal Quick Install Box with Ember Orange Accent */}
+                  <motion.div
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleCopyInstall}
+                    className="inline-flex items-center justify-between gap-3 px-3.5 py-2.5 bg-[#ff682c] text-white border border-[#ff682c] hover:bg-[#e0561f] cursor-pointer transition-all max-w-md group shadow-md"
+                    style={{ borderRadius: "0px" }}
+                    title="Click to copy install command"
                   >
-                    {pillar.tag}
-                  </span>
-                </div>
+                    <div className="flex items-center gap-2 font-mono text-xs text-white truncate">
+                      <span className="text-white/70 select-none">$</span>
+                      <span className="truncate font-semibold">{installCmd}</span>
+                    </div>
 
-                <p style={{ color: '#a1a1aa', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: '1.25rem' }}>
-                  {pillar.desc}
-                </p>
+                    <div className="flex items-center gap-1 text-[11px] font-mono text-white/90 group-hover:text-white flex-shrink-0 bg-black/20 px-2 py-0.5">
+                      {copiedInstall ? <Check size={12} className="text-white" /> : <Copy size={12} />}
+                      <span>{copiedInstall ? "Copied" : "Copy"}</span>
+                    </div>
+                  </motion.div>
+                </motion.div>
 
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {pillar.specs.map((spec, si) => (
-                    <span
-                      key={si}
-                      style={{
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: '0.72rem',
-                        color: '#d4d4d8',
-                        background: 'rgba(0, 0, 0, 0.4)',
-                        border: '1px solid rgba(255, 255, 255, 0.06)',
-                        padding: '0.2rem 0.6rem',
-                        borderRadius: '4px',
-                      }}
-                    >
-                      ✓ {spec}
-                    </span>
-                  ))}
-                </div>
+                {/* 3 Key figures with Counting Animation */}
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6, delay: 0.35, ease: "easeOut" }}
+                  className="grid grid-cols-3 gap-6 pt-6 border-t border-[#e8e8e8]"
+                >
+                  <div>
+                    <div className="font-heading text-3xl text-[#202020] tracking-tight">&lt;15 ms</div>
+                    <div className="text-xs text-[#828282] font-mono mt-1">SQLite Hot Query</div>
+                  </div>
+                  <div>
+                    <div className="font-heading text-3xl text-[#ff682c] tracking-tight">100%</div>
+                    <div className="text-xs text-[#828282] font-mono mt-1">Local &amp; Offline</div>
+                  </div>
+                  <div>
+                    <div className="font-heading text-3xl text-[#202020] tracking-tight">11 Crates</div>
+                    <div className="text-xs text-[#828282] font-mono mt-1">Rust Workspace</div>
+                  </div>
+                </motion.div>
+              </motion.div>
+
+              {/* Right: Live Interactive Ratatui TUI */}
+              <div className="lg:col-span-6" id="tui">
+                <GitxTerminalPlayground />
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ═══════════════════════════════
-          BENTO CAPABILITIES (6 CARDS)
-          ═══════════════════════════════ */}
-      <section
-        id="features"
-        style={{
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          padding: 'var(--section-py-lg) 1.5rem',
-        }}
-      >
-        <div className="container">
-          <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-            <h2
-              style={{
-                fontSize: 'clamp(2rem, 4vw, 3rem)',
-                fontWeight: 800,
-                color: '#ffffff',
-                letterSpacing: '-0.04em',
-                marginBottom: '1rem',
-              }}
-            >
-              Zero walled gardens.{' '}
-              <em className="vg-serif" style={{ color: '#ffffff', fontWeight: 400 }}>
-                100% open intelligence.
-              </em>
-            </h2>
-          </div>
-
-          <div className="grid-3">
-            {/* Card 1 */}
-            <div className="bento-card" style={{ minHeight: '340px' }}>
-              <div className="shine-layer" />
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
-                  11 Modular Rust Crates
-                </h3>
-                <p style={{ fontSize: '0.88rem', color: '#a1a1aa', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-                  Clean workspace division separating raw packfile parsing, database storage, DAG lineage, and Ratatui presentation.
-                </p>
-              </div>
-              <RustPulseRing />
-            </div>
-
-            {/* Card 2 */}
-            <div className="bento-card" style={{ minHeight: '340px' }}>
-              <div className="shine-layer" />
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
-                  File Lineage &amp; Renames
-                </h3>
-                <p style={{ fontSize: '0.88rem', color: '#a1a1aa', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-                  Maintains continuous attribution across structural renames, directory moves, and multi-branch merges over years.
-                </p>
-              </div>
-              <LineageForensicsVisual />
-            </div>
-
-            {/* Card 3 */}
-            <div className="bento-card" style={{ minHeight: '340px' }}>
-              <div className="shine-layer" />
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
-                  Deterministic 6-Score Health
-                </h3>
-                <p style={{ fontSize: '0.88rem', color: '#a1a1aa', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-                  Weighted transparent scoring across Hotspots, Ownership, Branch hygiene, Volatility, Architecture, and Recovery.
-                </p>
-              </div>
-              <HealthScorecardVisual />
-            </div>
-
-            {/* Card 4 */}
-            <div className="bento-card" style={{ minHeight: '340px' }}>
-              <div className="shine-layer" />
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
-                  SQLite FTS5 BM25 Search
-                </h3>
-                <p style={{ fontSize: '0.88rem', color: '#a1a1aa', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-                  Sub-millisecond full-text queries over commit messages, authors, branches, and symbol definitions.
-                </p>
-              </div>
-              <SqliteFts5Visual />
-            </div>
-
-            {/* Card 5 */}
-            <div className="bento-card" style={{ minHeight: '340px' }}>
-              <div className="shine-layer" />
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
-                  Reflog &amp; Dangling Objects
-                </h3>
-                <p style={{ fontSize: '0.88rem', color: '#a1a1aa', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-                  Resurrect orphaned commits and lost rebase experiments with read-only inspection and unified patch export.
-                </p>
-              </div>
-              <DisasterRecoveryVisual />
-            </div>
-
-            {/* Card 6 */}
-            <div className="bento-card" style={{ minHeight: '340px' }}>
-              <div className="shine-layer" />
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#ffffff', marginBottom: '0.5rem' }}>
-                  100% Offline &amp; Private
-                </h3>
-                <p style={{ fontSize: '0.88rem', color: '#a1a1aa', lineHeight: 1.5, marginBottom: '1.25rem' }}>
-                  Zero external network calls, zero telemetry, zero accounts. Your code and history stay strictly on your local machine.
-                </p>
-              </div>
-              <AirGapPrivacyVisual />
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ═══════════════════════════════
-          CLI WORKFLOW SHOWCASE
-          ═══════════════════════════════ */}
-      <section
-        id="cli"
-        style={{
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          padding: 'var(--section-py-lg) 1.5rem',
-        }}
-      >
-        <div className="container" style={{ maxWidth: '800px', textAlign: 'center' }}>
-          <h2
-            style={{
-              fontSize: 'clamp(2rem, 4vw, 3rem)',
-              fontWeight: 800,
-              color: '#ffffff',
-              letterSpacing: '-0.04em',
-              marginBottom: '2.5rem',
-            }}
-          >
-            One binary.{' '}
-            <em className="vg-serif" style={{ color: '#ffffff', fontWeight: 400 }}>
-              Unlimited insights.
-            </em>
-          </h2>
+        {/* =========================================================================
+            PROFESSIONAL INFINITE MARQUEE STRIP (AFTER HERO)
+            ========================================================================= */}
+        <MarqueeStrip />
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', textAlign: 'left' }}>
-            <InstallCmd cmd="gitx scan" label="Build local SQLite index" />
-            <InstallCmd cmd="gitx health" label="Emit 6-score health scorecard" />
-            <InstallCmd cmd="gitx hotspots --limit 5" label="Rank high-risk files" />
-            <InstallCmd cmd="gitx lineage src/engine.rs" label="Archaeology & rename lineage" />
-            <InstallCmd cmd="gitx tui" label="Launch 60 FPS interactive dashboard" />
+        {/* =========================================================================
+            THREE PILLARS OF REPOSITORY INTELLIGENCE (WITH 3D TILT CARDS)
+            ========================================================================= */}
+        <section className="py-20 md:py-24 bg-[#f9f9f9]">
+          <div className="section-container space-y-12">
+            <div className="max-w-2xl">
+              <h2 className="font-heading text-3xl md:text-4xl text-[#202020] tracking-[-0.02em]">
+                Built for deep codebase archaeology.
+              </h2>
+              <p className="text-base text-[#4d4d4d] mt-2 leading-relaxed">
+                Raw Git commands are slow for historical analytics. GUI tools are closed, heavy, and leak telemetry. GitX provides an explainable, local-first alternative.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <PillarCard
+                icon={<Database size={20} />}
+                title="Sub-Millisecond SQLite Cache"
+                description="Incrementally indexes commits into an embedded SQLite database with WAL mode. Re-runs take <15ms instead of minutes of shell parsing."
+                meta="rusqlite · bundled 3.45"
+                delay={0.05}
+              />
+
+              <PillarCard
+                icon={<Flame size={20} />}
+                title="Deterministic Risk Scores"
+                description="Exposes the exact mathematical formula behind file maintenance risk. No opaque AI ratings or hidden weights."
+                meta="5 raw signals · linear model"
+                delay={0.15}
+              />
+
+              <PillarCard
+                icon={<RotateCcw size={20} />}
+                title="Lossless Reflog Recovery"
+                description="Scans local Git object storage to recover commits lost during hard resets, aborted rebases, or detached HEAD deletions."
+                meta="zero network · raw .git/objects"
+                delay={0.25}
+              />
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ═══════════════════════════════
-          TESTIMONIAL QUOTE
-          ═══════════════════════════════ */}
-      <section
-        style={{
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          padding: 'var(--section-py-lg) 1.5rem',
-          textAlign: 'center',
-        }}
-      >
-        <div className="container" style={{ maxWidth: '800px' }}>
-          <blockquote
-            style={{
-              fontSize: 'clamp(1.2rem, 2.5vw, 1.6rem)',
-              color: '#ffffff',
-              fontStyle: 'italic',
-              lineHeight: 1.6,
-              marginBottom: '1.5rem',
-            }}
-            className="vg-serif"
-          >
-            &ldquo;Git has always stored the complete story of your codebase, but extracting answers with git log and git blame was painful. GitX turns the commit graph into an instantaneous, queryable knowledge engine.&rdquo;
-          </blockquote>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: '#a1a1aa' }}>
-            <span style={{ color: '#ffffff', fontWeight: 700 }}>Abuzar Khan</span> · Lead Systems Engineer, GitX
+        {/* =========================================================================
+            HOTSPOTS & RISK MATRIX
+            ========================================================================= */}
+        <section id="hotspots" className="py-20 md:py-24 bg-[#ffffff]">
+          <div className="section-container space-y-8">
+            <div className="max-w-2xl">
+              <h2 className="font-heading text-3xl md:text-4xl text-[#202020] tracking-[-0.02em]">
+                Explainable maintenance risk without black-box scores.
+              </h2>
+              <p className="text-base text-[#4d4d4d] mt-2 leading-relaxed">
+                Rank files by churn velocity, modification frequency, bug-fix commits, ownership concentration, and AST complexity.
+              </p>
+            </div>
+
+            <HotspotsRiskMatrix />
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ═══════════════════════════════
-          DOWNLOAD HUB
-          ═══════════════════════════════ */}
-      <section
-        id="download"
-        style={{
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          padding: 'var(--section-py-lg) 1.5rem',
-        }}
-      >
-        <div className="container" style={{ maxWidth: '960px' }}>
-          <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
-            <h2
-              style={{
-                fontSize: 'clamp(2rem, 4vw, 3rem)',
-                fontWeight: 800,
-                color: '#ffffff',
-                letterSpacing: '-0.04em',
-                marginBottom: '1rem',
-              }}
-            >
-              Get started in seconds.{' '}
-              <em className="vg-serif" style={{ color: '#ffffff', fontWeight: 400 }}>
-                100% Free.
-              </em>
-            </h2>
-            <p style={{ color: '#a1a1aa', fontSize: '1rem', maxWidth: '600px', margin: '0 auto' }}>
-              Download pre-built universal binaries for macOS, Linux, and Windows, or install directly via Cargo and Homebrew.
-            </p>
+        {/* =========================================================================
+            LINEAGE & ARCHAEOLOGY
+            ========================================================================= */}
+        <section id="lineage" className="py-20 md:py-24 border-t border-[#e8e8e8] bg-[#f9f9f9]">
+          <div className="section-container space-y-8">
+            <div className="max-w-2xl">
+              <h2 className="font-heading text-3xl md:text-4xl text-[#202020] tracking-[-0.02em]">
+                Rename-following lineage across multi-year history.
+              </h2>
+              <p className="text-base text-[#4d4d4d] mt-2 leading-relaxed">
+                Track a file's entire lifetime through renames, modular crate extractions, and refactors with tree-diff similarity heuristics.
+              </p>
+            </div>
+
+            <LineageArchaeologyVisualizer />
           </div>
+        </section>
 
-          <DownloadHub />
-        </div>
-      </section>
+        {/* =========================================================================
+            RECOVERY & REFLOG
+            ========================================================================= */}
+        <section id="recovery" className="py-20 md:py-24 border-t border-[#e8e8e8] bg-[#ffffff]">
+          <div className="section-container space-y-8">
+            <div className="max-w-2xl">
+              <h2 className="font-heading text-3xl md:text-4xl text-[#202020] tracking-[-0.02em]">
+                Rescue lost commits, rebases, and dangling trees.
+              </h2>
+              <p className="text-base text-[#4d4d4d] mt-2 leading-relaxed">
+                Scan local Git object storage to recover work orphaned by hard resets, abandoned cherry-picks, or deleted branches.
+              </p>
+            </div>
 
-      {/* ═══════════════════════════════
-          FAQ ACCORDION
-          ═══════════════════════════════ */}
-      <section
-        id="faq"
-        style={{
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          padding: 'var(--section-py-lg) 1.5rem',
-        }}
-      >
-        <div className="container" style={{ maxWidth: '800px' }}>
-          <div style={{ textAlign: 'center', marginBottom: '3.5rem' }}>
-            <h2
-              style={{
-                fontSize: 'clamp(2rem, 4vw, 3rem)',
-                fontWeight: 800,
-                color: '#ffffff',
-                letterSpacing: '-0.04em',
-                marginBottom: '1rem',
-              }}
-            >
-              Frequently asked{' '}
-              <em className="vg-serif" style={{ color: '#ffffff', fontWeight: 400 }}>
-                questions.
-              </em>
-            </h2>
+            <RecoveryStudio />
           </div>
+        </section>
 
-          <FaqAccordion />
-        </div>
-      </section>
+        {/* =========================================================================
+            BENCHMARKS — Solid Ember Orange Section
+            ========================================================================= */}
+        <section id="benchmarks" className="py-20 md:py-24 bg-[#ff682c] text-white border-t border-[#e0561f]">
+          <div className="section-container space-y-8">
+            <div className="max-w-2xl">
+              <h2 className="font-heading text-3xl md:text-4xl text-white tracking-[-0.02em]">
+                Criterion benchmarks against frontier tooling.
+              </h2>
+              <p className="text-base text-white/90 mt-2 leading-relaxed">
+                Tested across 1.2M commits on the Linux kernel repository for index throughput, query latency, and memory footprint.
+              </p>
+            </div>
+
+            <BenchmarkObservatory />
+          </div>
+        </section>
+
+        {/* =========================================================================
+            INSTALLATION & DEVELOPER HUB
+            ========================================================================= */}
+        <section id="install" className="py-20 md:py-24 border-t border-[#e8e8e8] bg-[#ffffff]">
+          <div className="section-container space-y-8">
+            <div className="max-w-2xl">
+              <h2 className="font-heading text-3xl md:text-4xl text-[#202020] tracking-[-0.02em]">
+                Install in seconds. Run anywhere.
+              </h2>
+              <p className="text-base text-[#4d4d4d] mt-2 leading-relaxed">
+                Distributed as standalone single binaries via shell installer, Cargo, Homebrew, or PowerShell.
+              </p>
+            </div>
+
+            <DeveloperHub />
+          </div>
+        </section>
+
+        {/* =========================================================================
+            FAQ
+            ========================================================================= */}
+        <section className="py-20 md:py-24 border-t border-[#e8e8e8] bg-[#f9f9f9]">
+          <div className="section-container max-w-3xl space-y-8">
+            <div>
+              <h2 className="font-heading text-3xl md:text-4xl text-[#202020] tracking-[-0.02em]">
+                Frequently answered questions.
+              </h2>
+            </div>
+
+            <FaqAccordion />
+          </div>
+        </section>
+      </main>
+
+      <Footer />
     </div>
   );
 }
